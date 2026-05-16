@@ -3,10 +3,9 @@ import { NativeEventEmitter, NativeModules, Platform } from 'react-native';
 export type FloatingAssistantNativeModule = {
   hasOverlayPermission: () => Promise<boolean>;
   openOverlaySettings: () => Promise<boolean>;
-  start: () => Promise<boolean>;
+  start: (sessionJson: string) => Promise<boolean>;
   hide: () => Promise<boolean>;
   stop: () => Promise<boolean>;
-  moveBy: (dx: number, dy: number) => void;
   bringAppToFront: () => Promise<boolean>;
 };
 
@@ -27,9 +26,9 @@ export const FloatingAssistantNative = {
     return nativeModule.openOverlaySettings();
   },
 
-  async start() {
+  async start(sessionJson: string) {
     if (!nativeModule) return false;
-    return nativeModule.start();
+    return nativeModule.start(sessionJson);
   },
 
   async hide() {
@@ -40,10 +39,6 @@ export const FloatingAssistantNative = {
   async stop() {
     if (!nativeModule) return false;
     return nativeModule.stop();
-  },
-
-  moveBy(dx: number, dy: number) {
-    nativeModule?.moveBy(dx, dy);
   },
 
   async bringAppToFront() {

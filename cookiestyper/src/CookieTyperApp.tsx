@@ -67,14 +67,38 @@ export default function App() {
       }
     };
 
+    const applyFloatingIndex = async (currentIndex: number) => {
+      const savedSession = await AsyncStorage.getItem(MAIN_SESSION_STORAGE_KEY);
+      if (!savedSession) return;
+
+      try {
+        const parsedSession = JSON.parse(savedSession);
+        parsedSession.currentIndex = currentIndex;
+        await AsyncStorage.setItem(MAIN_SESSION_STORAGE_KEY, JSON.stringify(parsedSession));
+        setSession(parsedSession);
+      } catch (error) {
+        console.error('Failed to apply floating assistant index', error);
+      }
+    };
+
     const appStateSubscription = AppState.addEventListener('change', state => {
       if (state === 'active') syncProgress();
     });
     const closeSubscription = floatingAssistantEvents?.addListener('FloatingAssistantClosed', syncProgress);
+    const indexSubscription = floatingAssistantEvents?.addListener('FloatingAssistantIndexChanged', event => {
+      if (typeof event?.currentIndex === 'number') {
+        applyFloatingIndex(event.currentIndex);
+      }
+    });
+    const errorSubscription = floatingAssistantEvents?.addListener('FloatingAssistantError', event => {
+      console.error('Floating assistant native error', event);
+    });
 
     return () => {
       appStateSubscription.remove();
       closeSubscription?.remove();
+      indexSubscription?.remove();
+      errorSubscription?.remove();
     };
   }, [setSession]);
 
@@ -116,7 +140,16 @@ export default function App() {
       return;
     }
 
-    await FloatingAssistantNative.start();
+    try {
+      await FloatingAssistantNative.start(JSON.stringify(floatingSession));
+    } catch (error) {
+      console.error('Failed to start floating assistant', error);
+      Alert.alert(
+        'تعذر تشغيل المساعد العائم',
+        'حدث خطأ أثناء تشغيل النافذة العائمة. سيتم فتح المساعد الداخلي الآن حتى لا تفقد جلستك.'
+      );
+      setScreen('assistant');
+    }
   };
 
   const handleStartRequested = (payload: string) => {

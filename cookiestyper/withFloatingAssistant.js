@@ -74,11 +74,12 @@ public class FloatingAssistantModule extends ReactContextBaseJavaModule {
   }
 
   @ReactMethod
-  public void start(Promise promise) {
+  public void start(String sessionJson, Promise promise) {
     try {
       Context context = getReactApplicationContext();
       Intent intent = new Intent(context, FloatingAssistantService.class);
       intent.setAction(FloatingAssistantService.ACTION_START);
+      intent.putExtra(FloatingAssistantService.EXTRA_SESSION_JSON, sessionJson);
 
       if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
         context.startForegroundService(intent);
@@ -119,8 +120,13 @@ public class FloatingAssistantModule extends ReactContextBaseJavaModule {
   }
 
   @ReactMethod
-  public void moveBy(double dx, double dy) {
-    FloatingAssistantService.moveBy((int) dx, (int) dy);
+  public void bringAppToFront(Promise promise) {
+    try {
+      FloatingAssistantService.openApp(getReactApplicationContext());
+      promise.resolve(true);
+    } catch (Exception exception) {
+      promise.reject("FLOATING_ASSISTANT_OPEN_APP_FAILED", exception);
+    }
   }
 
   @ReactMethod
@@ -131,21 +137,6 @@ public class FloatingAssistantModule extends ReactContextBaseJavaModule {
   @ReactMethod
   public void removeListeners(double count) {
     // Required by NativeEventEmitter.
-  }
-
-  @ReactMethod
-  public void bringAppToFront(Promise promise) {
-    try {
-      Context context = getReactApplicationContext();
-      Intent launchIntent = context.getPackageManager().getLaunchIntentForPackage(context.getPackageName());
-      if (launchIntent != null) {
-        launchIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_REORDER_TO_FRONT);
-        context.startActivity(launchIntent);
-      }
-      promise.resolve(true);
-    } catch (Exception exception) {
-      promise.reject("FLOATING_ASSISTANT_OPEN_APP_FAILED", exception);
-    }
   }
 }
 `;
@@ -187,43 +178,63 @@ import android.app.NotificationChannel;
 import android.app.NotificationManager;
 import android.app.PendingIntent;
 import android.app.Service;
+import android.content.ClipData;
+import android.content.ClipboardManager;
 import android.content.Context;
 import android.content.Intent;
+import android.graphics.Color;
 import android.graphics.PixelFormat;
+import android.graphics.Typeface;
+import android.graphics.drawable.GradientDrawable;
 import android.os.Build;
 import android.os.IBinder;
 import android.provider.Settings;
 import android.view.Gravity;
+import android.view.MotionEvent;
 import android.view.View;
 import android.view.WindowManager;
+import android.widget.LinearLayout;
+import android.widget.SeekBar;
+import android.widget.TextView;
+import android.widget.Toast;
 
 import androidx.annotation.Nullable;
 import androidx.core.app.NotificationCompat;
 
-import com.facebook.react.ReactApplication;
-import com.facebook.react.ReactInstanceManager;
-import com.facebook.react.ReactRootView;
 import com.facebook.react.bridge.Arguments;
 import com.facebook.react.bridge.WritableMap;
+
+import org.json.JSONArray;
+import org.json.JSONObject;
 
 public class FloatingAssistantService extends Service {
   public static final String ACTION_START = "${PACKAGE_NAME}.START";
   public static final String ACTION_HIDE = "${PACKAGE_NAME}.HIDE";
   public static final String ACTION_SHOW = "${PACKAGE_NAME}.SHOW";
   public static final String ACTION_STOP = "${PACKAGE_NAME}.STOP";
+  public static final String EXTRA_SESSION_JSON = "sessionJson";
 
   private static final String CHANNEL_ID = "cookie_typer_floating_assistant";
   private static final int NOTIFICATION_ID = 1209;
 
-  private static WindowManager windowManager;
-  private static WindowManager.LayoutParams layoutParams;
-  private static ReactRootView reactRootView;
-  private static FloatingAssistantService activeService;
+  private WindowManager windowManager;
+  private WindowManager.LayoutParams layoutParams;
+  private LinearLayout rootView;
+  private LinearLayout menuView;
+  private TextView counterText;
+  private TextView typeText;
+  private TextView payloadText;
+  private TextView dotView;
+  private SeekBar progressSeek;
+
+  private JSONArray elements = new JSONArray();
+  private int currentIndex = 0;
+  private int fontSize = 18;
+  private boolean startedInForeground = false;
 
   @Override
   public void onCreate() {
     super.onCreate();
-    activeService = this;
     windowManager = (WindowManager) getSystemService(WINDOW_SERVICE);
     createNotificationChannel();
   }
@@ -231,7 +242,6 @@ public class FloatingAssistantService extends Service {
   @Override
   public int onStartCommand(Intent intent, int flags, int startId) {
     String action = intent != null ? intent.getAction() : ACTION_START;
-    startForeground(NOTIFICATION_ID, buildNotification(false));
 
     if (ACTION_STOP.equals(action)) {
       stopAssistant();
@@ -248,6 +258,11 @@ public class FloatingAssistantService extends Service {
       return START_STICKY;
     }
 
+    String sessionJson = intent != null ? intent.getStringExtra(EXTRA_SESSION_JSON) : null;
+    if (sessionJson != null) {
+      hydrateSession(sessionJson);
+    }
+
     showAssistant();
     return START_STICKY;
   }
@@ -261,44 +276,66 @@ public class FloatingAssistantService extends Service {
   @Override
   public void onDestroy() {
     removeOverlayView();
-    activeService = null;
     super.onDestroy();
   }
 
-  public static void moveBy(int dx, int dy) {
-    if (windowManager == null || layoutParams == null || reactRootView == null) return;
+  public static void openApp(Context context) {
+    Intent launchIntent = context.getPackageManager().getLaunchIntentForPackage(context.getPackageName());
+    if (launchIntent != null) {
+      launchIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_REORDER_TO_FRONT);
+      context.startActivity(launchIntent);
+    }
+  }
 
-    layoutParams.x += dx;
-    layoutParams.y += dy;
-    windowManager.updateViewLayout(reactRootView, layoutParams);
+  private void hydrateSession(String sessionJson) {
+    try {
+      JSONObject session = new JSONObject(sessionJson);
+      elements = session.optJSONArray("elements");
+      if (elements == null) elements = new JSONArray();
+      currentIndex = clamp(session.optInt("currentIndex", 0), 0, Math.max(elements.length() - 1, 0));
+      fontSize = clamp(session.optInt("fontSize", 18), 10, 40);
+    } catch (Exception exception) {
+      elements = new JSONArray();
+      currentIndex = 0;
+      fontSize = 18;
+      emitError("invalid_session", exception.getMessage());
+    }
   }
 
   private void showAssistant() {
     if (!canDrawOverlays()) {
-      WritableMap payload = Arguments.createMap();
-      payload.putString("reason", "missing_overlay_permission");
-      FloatingAssistantModule.emitEvent("FloatingAssistantClosed", payload);
-      stopSelf();
+      emitError("missing_overlay_permission", "SYSTEM_ALERT_WINDOW is not granted");
+      stopSelfSafely();
       return;
     }
 
-    if (reactRootView == null) {
-      attachOverlayView();
-    } else {
-      reactRootView.setVisibility(View.VISIBLE);
+    if (!ensureForeground()) {
+      stopSelfSafely();
+      return;
     }
 
-    NotificationManager manager = (NotificationManager) getSystemService(Context.NOTIFICATION_SERVICE);
-    manager.notify(NOTIFICATION_ID, buildNotification(false));
+    try {
+      if (rootView == null) {
+        attachOverlayView();
+      } else {
+        rootView.setVisibility(View.VISIBLE);
+      }
+      updateUi();
+    } catch (Exception exception) {
+      emitError("attach_overlay_failed", exception.getMessage());
+      stopSelfSafely();
+    }
   }
 
   private void hideAssistant() {
-    if (reactRootView != null) {
-      reactRootView.setVisibility(View.GONE);
+    if (rootView != null) {
+      rootView.setVisibility(View.GONE);
     }
 
-    NotificationManager manager = (NotificationManager) getSystemService(Context.NOTIFICATION_SERVICE);
-    manager.notify(NOTIFICATION_ID, buildNotification(true));
+    if (startedInForeground) {
+      NotificationManager manager = (NotificationManager) getSystemService(Context.NOTIFICATION_SERVICE);
+      manager.notify(NOTIFICATION_ID, buildNotification(true));
+    }
 
     WritableMap payload = Arguments.createMap();
     payload.putString("state", "hidden");
@@ -312,23 +349,130 @@ public class FloatingAssistantService extends Service {
     payload.putString("state", "stopped");
     FloatingAssistantModule.emitEvent("FloatingAssistantClosed", payload);
 
-    stopForeground(true);
+    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
+      stopForeground(STOP_FOREGROUND_REMOVE);
+    } else {
+      stopForeground(true);
+    }
     stopSelf();
   }
 
-  private void attachOverlayView() {
-    ReactApplication application = (ReactApplication) getApplication();
-    ReactInstanceManager reactInstanceManager = application.getReactNativeHost().getReactInstanceManager();
+  private boolean ensureForeground() {
+    if (startedInForeground) return true;
 
-    reactRootView = new ReactRootView(this);
-    reactRootView.startReactApplication(reactInstanceManager, "FloatingAssistant", null);
+    try {
+      startForeground(NOTIFICATION_ID, buildNotification(false));
+      startedInForeground = true;
+      return true;
+    } catch (Exception exception) {
+      emitError("foreground_failed", exception.getMessage());
+      return false;
+    }
+  }
+
+  private void attachOverlayView() {
+    rootView = new LinearLayout(this);
+    rootView.setOrientation(LinearLayout.VERTICAL);
+    rootView.setPadding(dp(14), dp(8), dp(14), dp(14));
+    rootView.setBackground(roundedDrawable(Color.argb(245, 5, 5, 10), dp(26), Color.argb(42, 255, 255, 255), 1));
+
+    LinearLayout grip = new LinearLayout(this);
+    grip.setGravity(Gravity.CENTER);
+    TextView gripBar = new TextView(this);
+    gripBar.setWidth(dp(54));
+    gripBar.setHeight(dp(4));
+    gripBar.setBackground(roundedDrawable(Color.argb(45, 255, 255, 255), dp(99), Color.TRANSPARENT, 0));
+    grip.addView(gripBar);
+    rootView.addView(grip, new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, dp(18)));
+    installDragHandler(grip);
+
+    LinearLayout header = new LinearLayout(this);
+    header.setGravity(Gravity.CENTER_VERTICAL);
+    header.setOrientation(LinearLayout.HORIZONTAL);
+
+    TextView menuButton = smallButton("⋮");
+    menuButton.setOnClickListener(view -> toggleMenu());
+    header.addView(menuButton, new LinearLayout.LayoutParams(dp(34), dp(34)));
+
+    LinearLayout titleBlock = new LinearLayout(this);
+    titleBlock.setOrientation(LinearLayout.VERTICAL);
+    titleBlock.setGravity(Gravity.CENTER);
+    TextView title = new TextView(this);
+    title.setText("CookieTyper");
+    title.setTextColor(Color.WHITE);
+    title.setTypeface(Typeface.DEFAULT_BOLD);
+    title.setTextSize(15);
+    title.setGravity(Gravity.CENTER);
+    counterText = new TextView(this);
+    counterText.setTextColor(Color.rgb(168, 85, 247));
+    counterText.setTypeface(Typeface.DEFAULT_BOLD);
+    counterText.setTextSize(12);
+    counterText.setGravity(Gravity.CENTER);
+    titleBlock.addView(title);
+    titleBlock.addView(counterText);
+    header.addView(titleBlock, new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1));
+
+    dotView = new TextView(this);
+    header.addView(dotView, new LinearLayout.LayoutParams(dp(16), dp(16)));
+    rootView.addView(header);
+
+    typeText = new TextView(this);
+    typeText.setTextColor(Color.argb(120, 255, 255, 255));
+    typeText.setTypeface(Typeface.DEFAULT_BOLD);
+    typeText.setTextSize(10);
+    typeText.setGravity(Gravity.RIGHT);
+    typeText.setPadding(0, dp(8), 0, dp(4));
+    rootView.addView(typeText);
+
+    payloadText = new TextView(this);
+    payloadText.setTextColor(Color.WHITE);
+    payloadText.setTypeface(Typeface.DEFAULT_BOLD);
+    payloadText.setGravity(Gravity.CENTER);
+    payloadText.setMinHeight(dp(105));
+    payloadText.setMaxLines(5);
+    payloadText.setPadding(dp(14), dp(12), dp(14), dp(12));
+    payloadText.setOnClickListener(view -> copyCurrentText());
+    rootView.addView(payloadText, new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT));
+
+    LinearLayout nav = new LinearLayout(this);
+    nav.setOrientation(LinearLayout.HORIZONTAL);
+    nav.setPadding(0, dp(10), 0, dp(6));
+    TextView prev = navButton("السابق  ←");
+    TextView next = navButton("→  التالي");
+    prev.setOnClickListener(view -> goToIndex(currentIndex - 1));
+    next.setOnClickListener(view -> goToIndex(currentIndex + 1));
+    nav.addView(prev, new LinearLayout.LayoutParams(0, dp(44), 1));
+    LinearLayout.LayoutParams gap = new LinearLayout.LayoutParams(dp(10), 1);
+    TextView spacer = new TextView(this);
+    nav.addView(spacer, gap);
+    nav.addView(next, new LinearLayout.LayoutParams(0, dp(44), 1));
+    rootView.addView(nav);
+
+    progressSeek = new SeekBar(this);
+    progressSeek.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
+      @Override
+      public void onProgressChanged(SeekBar seekBar, int progress, boolean fromUser) {
+        if (fromUser) goToIndex(progress);
+      }
+
+      @Override
+      public void onStartTrackingTouch(SeekBar seekBar) {}
+
+      @Override
+      public void onStopTrackingTouch(SeekBar seekBar) {}
+    });
+    rootView.addView(progressSeek, new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, dp(36)));
+
+    menuView = buildMenuView();
+    menuView.setVisibility(View.GONE);
+    rootView.addView(menuView);
 
     int overlayType = Build.VERSION.SDK_INT >= Build.VERSION_CODES.O
       ? WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
       : WindowManager.LayoutParams.TYPE_PHONE;
 
     layoutParams = new WindowManager.LayoutParams(
-      WindowManager.LayoutParams.WRAP_CONTENT,
+      dp(390),
       WindowManager.LayoutParams.WRAP_CONTENT,
       overlayType,
       WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE
@@ -336,21 +480,134 @@ public class FloatingAssistantService extends Service {
       PixelFormat.TRANSLUCENT
     );
     layoutParams.gravity = Gravity.TOP | Gravity.START;
-    layoutParams.x = 24;
-    layoutParams.y = 160;
+    layoutParams.x = dp(14);
+    layoutParams.y = dp(140);
 
-    windowManager.addView(reactRootView, layoutParams);
+    windowManager.addView(rootView, layoutParams);
+  }
+
+  private LinearLayout buildMenuView() {
+    LinearLayout menu = new LinearLayout(this);
+    menu.setOrientation(LinearLayout.VERTICAL);
+    menu.setPadding(dp(8), dp(8), dp(8), dp(8));
+    menu.setBackground(roundedDrawable(Color.argb(245, 0, 0, 0), dp(16), Color.argb(35, 255, 255, 255), 1));
+
+    TextView hide = menuItem("إخفاء مؤقت");
+    hide.setOnClickListener(view -> hideAssistant());
+    TextView open = menuItem("العودة للتطبيق");
+    open.setOnClickListener(view -> openApp(this));
+    TextView stop = menuItem("إنهاء الجلسة");
+    stop.setTextColor(Color.rgb(251, 113, 133));
+    stop.setOnClickListener(view -> stopAssistant());
+
+    menu.addView(hide);
+    menu.addView(open);
+    menu.addView(stop);
+    return menu;
+  }
+
+  private void updateUi() {
+    int total = elements.length();
+    if (total <= 0) {
+      counterText.setText("0 / 0");
+      typeText.setText("عادي");
+      payloadText.setText("لا توجد جلسة نشطة");
+      progressSeek.setMax(0);
+      progressSeek.setProgress(0);
+      return;
+    }
+
+    currentIndex = clamp(currentIndex, 0, total - 1);
+    JSONObject element = elements.optJSONObject(currentIndex);
+    if (element == null) return;
+
+    String type = element.optString("type", "عادي");
+    String text = element.optString("text", "");
+    int color = parseColor(element.optString("color", "#a855f7"));
+
+    counterText.setText((currentIndex + 1) + " / " + total);
+    typeText.setText(type);
+    payloadText.setText(text);
+    payloadText.setTextSize(fontSize);
+    payloadText.setBackground(roundedDrawable(withAlpha(color, 46), dp(20), withAlpha(color, 100), 1));
+    dotView.setBackground(roundedDrawable(color, dp(99), Color.argb(120, 255, 255, 255), 2));
+    progressSeek.setMax(Math.max(total - 1, 0));
+    progressSeek.setProgress(currentIndex);
+  }
+
+  private void goToIndex(int nextIndex) {
+    int total = elements.length();
+    if (total <= 0) return;
+    currentIndex = clamp(nextIndex, 0, total - 1);
+    updateUi();
+    emitIndexChanged();
+  }
+
+  private void copyCurrentText() {
+    JSONObject element = elements.optJSONObject(currentIndex);
+    if (element == null) return;
+
+    ClipboardManager clipboard = (ClipboardManager) getSystemService(CLIPBOARD_SERVICE);
+    clipboard.setPrimaryClip(ClipData.newPlainText("CookieTyper", element.optString("text", "")));
+    Toast.makeText(this, "تم النسخ", Toast.LENGTH_SHORT).show();
+  }
+
+  private void emitIndexChanged() {
+    WritableMap payload = Arguments.createMap();
+    payload.putInt("currentIndex", currentIndex);
+    FloatingAssistantModule.emitEvent("FloatingAssistantIndexChanged", payload);
+  }
+
+  private void emitError(String reason, String message) {
+    WritableMap payload = Arguments.createMap();
+    payload.putString("reason", reason);
+    if (message != null) payload.putString("message", message);
+    FloatingAssistantModule.emitEvent("FloatingAssistantError", payload);
+  }
+
+  private void toggleMenu() {
+    if (menuView == null) return;
+    menuView.setVisibility(menuView.getVisibility() == View.VISIBLE ? View.GONE : View.VISIBLE);
+  }
+
+  private void installDragHandler(View dragView) {
+    dragView.setOnTouchListener(new View.OnTouchListener() {
+      private int startX;
+      private int startY;
+      private float touchStartX;
+      private float touchStartY;
+
+      @Override
+      public boolean onTouch(View view, MotionEvent event) {
+        if (layoutParams == null || windowManager == null || rootView == null) return false;
+
+        switch (event.getAction()) {
+          case MotionEvent.ACTION_DOWN:
+            startX = layoutParams.x;
+            startY = layoutParams.y;
+            touchStartX = event.getRawX();
+            touchStartY = event.getRawY();
+            return true;
+          case MotionEvent.ACTION_MOVE:
+            layoutParams.x = startX + (int) (event.getRawX() - touchStartX);
+            layoutParams.y = startY + (int) (event.getRawY() - touchStartY);
+            windowManager.updateViewLayout(rootView, layoutParams);
+            return true;
+          default:
+            return true;
+        }
+      }
+    });
   }
 
   private void removeOverlayView() {
-    if (reactRootView != null) {
+    if (rootView != null) {
       try {
-        reactRootView.unmountReactApplication();
-        windowManager.removeView(reactRootView);
+        windowManager.removeView(rootView);
       } catch (Exception ignored) {
         // The system may have already removed the view while the service is closing.
       }
-      reactRootView = null;
+      rootView = null;
       layoutParams = null;
     }
   }
@@ -362,19 +619,17 @@ public class FloatingAssistantService extends Service {
   private Notification buildNotification(boolean hidden) {
     Intent launchIntent = getPackageManager().getLaunchIntentForPackage(getPackageName());
     PendingIntent contentIntent = null;
+    int pendingFlags = Build.VERSION.SDK_INT >= Build.VERSION_CODES.M
+      ? PendingIntent.FLAG_IMMUTABLE | PendingIntent.FLAG_UPDATE_CURRENT
+      : PendingIntent.FLAG_UPDATE_CURRENT;
+
     if (launchIntent != null) {
       launchIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_REORDER_TO_FRONT);
-      int flags = Build.VERSION.SDK_INT >= Build.VERSION_CODES.M
-        ? PendingIntent.FLAG_IMMUTABLE | PendingIntent.FLAG_UPDATE_CURRENT
-        : PendingIntent.FLAG_UPDATE_CURRENT;
-      contentIntent = PendingIntent.getActivity(this, 0, launchIntent, flags);
+      contentIntent = PendingIntent.getActivity(this, 0, launchIntent, pendingFlags);
     }
 
     Intent showIntent = new Intent(this, FloatingAssistantService.class);
     showIntent.setAction(ACTION_SHOW);
-    int pendingFlags = Build.VERSION.SDK_INT >= Build.VERSION_CODES.M
-      ? PendingIntent.FLAG_IMMUTABLE | PendingIntent.FLAG_UPDATE_CURRENT
-      : PendingIntent.FLAG_UPDATE_CURRENT;
     PendingIntent showPendingIntent = PendingIntent.getService(this, 1, showIntent, pendingFlags);
 
     Intent stopIntent = new Intent(this, FloatingAssistantService.class);
@@ -387,8 +642,8 @@ public class FloatingAssistantService extends Service {
       .setContentText(hidden ? "المساعد العائم مخفي مؤقتًا" : "المساعد العائم يعمل")
       .setOngoing(!hidden)
       .setPriority(NotificationCompat.PRIORITY_LOW)
-      .addAction(0, "استعادة", showPendingIntent)
-      .addAction(0, "إنهاء", stopPendingIntent);
+      .addAction(getApplicationInfo().icon, "استعادة", showPendingIntent)
+      .addAction(getApplicationInfo().icon, "إنهاء", stopPendingIntent);
 
     if (contentIntent != null) {
       builder.setContentIntent(contentIntent);
@@ -409,6 +664,79 @@ public class FloatingAssistantService extends Service {
 
     NotificationManager manager = (NotificationManager) getSystemService(Context.NOTIFICATION_SERVICE);
     manager.createNotificationChannel(channel);
+  }
+
+  private void stopSelfSafely() {
+    removeOverlayView();
+    if (startedInForeground) {
+      if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
+        stopForeground(STOP_FOREGROUND_REMOVE);
+      } else {
+        stopForeground(true);
+      }
+    }
+    stopSelf();
+  }
+
+  private TextView smallButton(String text) {
+    TextView button = new TextView(this);
+    button.setText(text);
+    button.setTextColor(Color.WHITE);
+    button.setTextSize(20);
+    button.setGravity(Gravity.CENTER);
+    button.setTypeface(Typeface.DEFAULT_BOLD);
+    button.setBackground(roundedDrawable(Color.argb(24, 255, 255, 255), dp(99), Color.TRANSPARENT, 0));
+    return button;
+  }
+
+  private TextView navButton(String text) {
+    TextView button = new TextView(this);
+    button.setText(text);
+    button.setTextColor(Color.WHITE);
+    button.setTextSize(13);
+    button.setGravity(Gravity.CENTER);
+    button.setTypeface(Typeface.DEFAULT_BOLD);
+    button.setBackground(roundedDrawable(Color.argb(22, 255, 255, 255), dp(16), Color.argb(26, 255, 255, 255), 1));
+    return button;
+  }
+
+  private TextView menuItem(String text) {
+    TextView item = new TextView(this);
+    item.setText(text);
+    item.setTextColor(Color.WHITE);
+    item.setTextSize(14);
+    item.setGravity(Gravity.RIGHT);
+    item.setTypeface(Typeface.DEFAULT_BOLD);
+    item.setPadding(dp(14), dp(10), dp(14), dp(10));
+    return item;
+  }
+
+  private GradientDrawable roundedDrawable(int color, int radius, int strokeColor, int strokeWidth) {
+    GradientDrawable drawable = new GradientDrawable();
+    drawable.setColor(color);
+    drawable.setCornerRadius(radius);
+    if (strokeWidth > 0) drawable.setStroke(dp(strokeWidth), strokeColor);
+    return drawable;
+  }
+
+  private int parseColor(String color) {
+    try {
+      return Color.parseColor(color);
+    } catch (Exception exception) {
+      return Color.rgb(168, 85, 247);
+    }
+  }
+
+  private int withAlpha(int color, int alpha) {
+    return Color.argb(alpha, Color.red(color), Color.green(color), Color.blue(color));
+  }
+
+  private int clamp(int value, int min, int max) {
+    return Math.max(min, Math.min(value, max));
+  }
+
+  private int dp(int value) {
+    return (int) (value * getResources().getDisplayMetrics().density + 0.5f);
   }
 }
 `;
