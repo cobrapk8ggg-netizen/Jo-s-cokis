@@ -14,8 +14,10 @@ import {
   Linking
 } from 'react-native';
 import * as Clipboard from 'expo-clipboard';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Trash2, Plus, ChevronRight, Disc as DiscordIcon } from 'lucide-react-native';
-import { Settings, TagType } from '../types';
+import { AssistantModePreference, Settings, TagType } from '../types';
+import { ASSISTANT_MODE_STORAGE_KEY } from '../floatingSession';
 
 const { width } = Dimensions.get('window');
 
@@ -41,6 +43,7 @@ interface SettingsScreenProps {
   settings: Settings;
   onSave: (settings: Settings) => void;
   onReset: () => void;
+  onAssistantModeChange?: (assistantMode: AssistantModePreference) => void;
   onClose: () => void;
 }
 
@@ -48,6 +51,7 @@ export const SettingsScreen: React.FC<SettingsScreenProps> = ({
   settings: initialSettings,
   onSave,
   onReset,
+  onAssistantModeChange,
   onClose
 }) => {
   const [settings, setSettings] = React.useState<Settings>(initialSettings);
@@ -103,6 +107,12 @@ export const SettingsScreen: React.FC<SettingsScreenProps> = ({
       ...prev,
       fontSize: nextFontSize,
     }));
+  };
+
+  const updateAssistantMode = async (assistantMode: AssistantModePreference) => {
+    setSettings(prev => ({ ...prev, assistantMode }));
+    onAssistantModeChange?.(assistantMode);
+    await AsyncStorage.setItem(ASSISTANT_MODE_STORAGE_KEY, assistantMode);
   };
 
   const handleDiscordPress = async () => {
@@ -258,6 +268,40 @@ export const SettingsScreen: React.FC<SettingsScreenProps> = ({
             <Animated.View style={[styles.customToggleInner, { transform: [{ translateX: toggleTranslateX }] }]} />
           </View>
         </TouchableOpacity>
+
+        {Platform.OS === 'android' && (
+          <View style={styles.card}>
+            <Text style={styles.cardTitle}>وضع المساعد</Text>
+            <Text style={styles.assistantModeDesc}>
+              اختر طريقة فتح الجلسة القادمة عند الضغط على START. لا يؤثر هذا على جلسة مفتوحة حالياً.
+            </Text>
+            <View style={styles.assistantModeOptions}>
+              <TouchableOpacity
+                activeOpacity={0.85}
+                onPress={() => updateAssistantMode('floating')}
+                style={[
+                  styles.assistantModeOption,
+                  settings.assistantMode === 'floating' && styles.activeAssistantModeOption,
+                ]}
+              >
+                <Text style={styles.assistantModeTitle}>عائم</Text>
+                <Text style={styles.assistantModeHint}>فوق التطبيقات الأخرى</Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                activeOpacity={0.85}
+                onPress={() => updateAssistantMode('inapp')}
+                style={[
+                  styles.assistantModeOption,
+                  (settings.assistantMode || 'inapp') === 'inapp' && styles.activeAssistantModeOption,
+                ]}
+              >
+                <Text style={styles.assistantModeTitle}>داخلي</Text>
+                <Text style={styles.assistantModeHint}>داخل CookieTyper</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        )}
 
         {/* Official Discord Card */}
         <TouchableOpacity activeOpacity={0.85} onPress={handleDiscordPress} style={styles.discordCard}>
@@ -543,6 +587,41 @@ const styles = StyleSheet.create({
     shadowRadius: 2,
     shadowOpacity: 0.2,
     elevation: 2,
+  },
+  assistantModeDesc: {
+    color: 'rgba(255,255,255,0.38)',
+    fontSize: 13,
+    lineHeight: 21,
+    textAlign: 'right',
+    marginBottom: 16,
+  },
+  assistantModeOptions: {
+    flexDirection: 'row-reverse',
+    gap: 12,
+  },
+  assistantModeOption: {
+    flex: 1,
+    padding: 16,
+    borderRadius: 18,
+    backgroundColor: 'rgba(255,255,255,0.045)',
+    borderWidth: 1.5,
+    borderColor: 'rgba(255,255,255,0.08)',
+  },
+  activeAssistantModeOption: {
+    backgroundColor: 'rgba(124,58,237,0.16)',
+    borderColor: 'rgba(168,85,247,0.55)',
+  },
+  assistantModeTitle: {
+    color: 'white',
+    fontSize: 18,
+    fontWeight: '900',
+    textAlign: 'right',
+  },
+  assistantModeHint: {
+    color: 'rgba(255,255,255,0.35)',
+    fontSize: 12,
+    marginTop: 5,
+    textAlign: 'right',
   },
   discordCard: {
     flexDirection: 'row-reverse',
