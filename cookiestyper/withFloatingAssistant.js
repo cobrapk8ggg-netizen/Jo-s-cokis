@@ -231,6 +231,7 @@ public class FloatingAssistantService extends Service {
   private JSONArray elements = new JSONArray();
   private int currentIndex = 0;
   private int fontSize = 18;
+  private int assistantScale = 100;
   private boolean startedInForeground = false;
 
   @Override
@@ -295,10 +296,12 @@ public class FloatingAssistantService extends Service {
       if (elements == null) elements = new JSONArray();
       currentIndex = clamp(session.optInt("currentIndex", 0), 0, Math.max(elements.length() - 1, 0));
       fontSize = clamp(session.optInt("fontSize", 18), 10, 40);
+      assistantScale = clamp(session.optInt("assistantScale", 100), 80, 120);
     } catch (Exception exception) {
       elements = new JSONArray();
       currentIndex = 0;
       fontSize = 18;
+      assistantScale = 100;
       emitError("invalid_session", exception.getMessage());
     }
   }
@@ -374,17 +377,17 @@ public class FloatingAssistantService extends Service {
   private void attachOverlayView() {
     rootView = new LinearLayout(this);
     rootView.setOrientation(LinearLayout.VERTICAL);
-    rootView.setPadding(dp(10), dp(6), dp(10), dp(10));
+    rootView.setPadding(sdp(10), sdp(6), sdp(10), sdp(10));
     rootView.setBackground(roundedDrawable(Color.argb(238, 5, 5, 10), dp(22), Color.argb(42, 255, 255, 255), 1));
 
     LinearLayout grip = new LinearLayout(this);
     grip.setGravity(Gravity.CENTER);
     TextView gripBar = new TextView(this);
-    gripBar.setWidth(dp(42));
-    gripBar.setHeight(dp(3));
-    gripBar.setBackground(roundedDrawable(Color.argb(45, 255, 255, 255), dp(99), Color.TRANSPARENT, 0));
+    gripBar.setWidth(sdp(42));
+    gripBar.setHeight(sdp(3));
+    gripBar.setBackground(roundedDrawable(Color.argb(45, 255, 255, 255), sdp(99), Color.TRANSPARENT, 0));
     grip.addView(gripBar);
-    rootView.addView(grip, new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, dp(14)));
+    rootView.addView(grip, new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, sdp(14)));
     installDragHandler(grip);
 
     LinearLayout header = new LinearLayout(this);
@@ -393,7 +396,7 @@ public class FloatingAssistantService extends Service {
 
     TextView menuButton = smallButton("⋮");
     menuButton.setOnClickListener(view -> toggleMenu());
-    header.addView(menuButton, new LinearLayout.LayoutParams(dp(28), dp(28)));
+    header.addView(menuButton, new LinearLayout.LayoutParams(sdp(28), sdp(28)));
 
     LinearLayout titleBlock = new LinearLayout(this);
     titleBlock.setOrientation(LinearLayout.VERTICAL);
@@ -402,52 +405,52 @@ public class FloatingAssistantService extends Service {
     title.setText("CookieTyper");
     title.setTextColor(Color.WHITE);
     title.setTypeface(Typeface.DEFAULT_BOLD);
-    title.setTextSize(13);
+    title.setTextSize(scaledText(13));
     title.setGravity(Gravity.CENTER);
     counterText = new TextView(this);
     counterText.setTextColor(Color.rgb(242, 166, 184));
     counterText.setTypeface(Typeface.DEFAULT_BOLD);
-    counterText.setTextSize(11);
+    counterText.setTextSize(scaledText(11));
     counterText.setGravity(Gravity.CENTER);
     titleBlock.addView(title);
     titleBlock.addView(counterText);
     header.addView(titleBlock, new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1));
 
     dotView = new TextView(this);
-    header.addView(dotView, new LinearLayout.LayoutParams(dp(12), dp(12)));
+    header.addView(dotView, new LinearLayout.LayoutParams(sdp(12), sdp(12)));
     rootView.addView(header);
 
     typeText = new TextView(this);
     typeText.setTextColor(Color.argb(120, 255, 255, 255));
     typeText.setTypeface(Typeface.DEFAULT_BOLD);
-    typeText.setTextSize(9);
+    typeText.setTextSize(scaledText(9));
     typeText.setGravity(Gravity.RIGHT);
-    typeText.setPadding(0, dp(4), dp(2), dp(2));
+    typeText.setPadding(0, sdp(4), sdp(2), sdp(2));
     rootView.addView(typeText);
 
     payloadText = new TextView(this);
     payloadText.setTextColor(Color.WHITE);
     payloadText.setTypeface(Typeface.DEFAULT_BOLD);
     payloadText.setGravity(Gravity.CENTER);
-    payloadText.setMinHeight(dp(58));
+    payloadText.setMinHeight(sdp(58));
     payloadText.setMaxLines(3);
-    payloadText.setPadding(dp(10), dp(8), dp(10), dp(8));
+    payloadText.setPadding(sdp(10), sdp(8), sdp(10), sdp(8));
     payloadText.setOnClickListener(view -> copyCurrentText());
-    rootView.addView(payloadText, new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT));
 
-    LinearLayout nav = new LinearLayout(this);
-    nav.setOrientation(LinearLayout.HORIZONTAL);
-    nav.setPadding(0, dp(7), 0, dp(2));
+    LinearLayout strip = new LinearLayout(this);
+    strip.setOrientation(LinearLayout.HORIZONTAL);
+    strip.setGravity(Gravity.CENTER_VERTICAL);
+    strip.setPadding(0, sdp(6), 0, sdp(4));
     TextView prev = navButton("‹");
     TextView next = navButton("›");
     prev.setOnClickListener(view -> goToIndex(currentIndex - 1));
     next.setOnClickListener(view -> goToIndex(currentIndex + 1));
-    LinearLayout.LayoutParams navButtonParams = new LinearLayout.LayoutParams(dp(36), dp(36));
-    nav.addView(prev, navButtonParams);
-    TextView spacer = new TextView(this);
-    nav.addView(spacer, new LinearLayout.LayoutParams(0, 1, 1));
-    nav.addView(next, new LinearLayout.LayoutParams(dp(36), dp(36)));
-    rootView.addView(nav);
+    strip.addView(prev, new LinearLayout.LayoutParams(sdp(34), sdp(54)));
+    LinearLayout.LayoutParams payloadParams = new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1);
+    payloadParams.setMargins(sdp(7), 0, sdp(7), 0);
+    strip.addView(payloadText, payloadParams);
+    strip.addView(next, new LinearLayout.LayoutParams(sdp(34), sdp(54)));
+    rootView.addView(strip);
 
     progressSeek = new SeekBar(this);
     progressSeek.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
@@ -466,7 +469,7 @@ public class FloatingAssistantService extends Service {
       progressSeek.setProgressTintList(ColorStateList.valueOf(Color.rgb(201, 111, 134)));
       progressSeek.setThumbTintList(ColorStateList.valueOf(Color.rgb(255, 209, 220)));
     }
-    rootView.addView(progressSeek, new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, dp(28)));
+    rootView.addView(progressSeek, new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, sdp(28)));
 
     menuView = buildMenuView();
     menuView.setVisibility(View.GONE);
@@ -533,9 +536,9 @@ public class FloatingAssistantService extends Service {
     counterText.setText((currentIndex + 1) + " / " + total);
     typeText.setText("عادي".equals(type) ? "" : type);
     payloadText.setText(text);
-    payloadText.setTextSize(fontSize);
-    payloadText.setBackground(roundedDrawable(withAlpha(color, 42), dp(16), withAlpha(color, 92), 1));
-    dotView.setBackground(roundedDrawable(color, dp(99), Color.argb(120, 255, 255, 255), 2));
+    payloadText.setTextSize(scaledText(fontSize));
+    payloadText.setBackground(roundedDrawable(withAlpha(color, 42), sdp(16), withAlpha(color, 92), 1));
+    dotView.setBackground(roundedDrawable(color, sdp(99), Color.argb(120, 255, 255, 255), 2));
     progressSeek.setMax(Math.max(total - 1, 0));
     progressSeek.setProgress(currentIndex);
   }
@@ -691,10 +694,10 @@ public class FloatingAssistantService extends Service {
     TextView button = new TextView(this);
     button.setText(text);
     button.setTextColor(Color.WHITE);
-    button.setTextSize(18);
+    button.setTextSize(scaledText(18));
     button.setGravity(Gravity.CENTER);
     button.setTypeface(Typeface.DEFAULT_BOLD);
-    button.setBackground(roundedDrawable(Color.argb(24, 255, 255, 255), dp(99), Color.TRANSPARENT, 0));
+    button.setBackground(roundedDrawable(Color.argb(24, 255, 255, 255), sdp(99), Color.TRANSPARENT, 0));
     return button;
   }
 
@@ -702,10 +705,10 @@ public class FloatingAssistantService extends Service {
     TextView button = new TextView(this);
     button.setText(text);
     button.setTextColor(Color.WHITE);
-    button.setTextSize(24);
+    button.setTextSize(scaledText(24));
     button.setGravity(Gravity.CENTER);
     button.setTypeface(Typeface.DEFAULT_BOLD);
-    button.setBackground(roundedDrawable(Color.argb(24, 255, 255, 255), dp(99), Color.argb(30, 255, 255, 255), 1));
+    button.setBackground(roundedDrawable(Color.argb(24, 255, 255, 255), sdp(99), Color.argb(30, 255, 255, 255), 1));
     return button;
   }
 
@@ -713,10 +716,10 @@ public class FloatingAssistantService extends Service {
     TextView item = new TextView(this);
     item.setText(text);
     item.setTextColor(Color.WHITE);
-    item.setTextSize(14);
+    item.setTextSize(scaledText(14));
     item.setGravity(Gravity.RIGHT);
     item.setTypeface(Typeface.DEFAULT_BOLD);
-    item.setPadding(dp(14), dp(10), dp(14), dp(10));
+    item.setPadding(sdp(14), sdp(10), sdp(14), sdp(10));
     return item;
   }
 
@@ -724,7 +727,7 @@ public class FloatingAssistantService extends Service {
     GradientDrawable drawable = new GradientDrawable();
     drawable.setColor(color);
     drawable.setCornerRadius(radius);
-    if (strokeWidth > 0) drawable.setStroke(dp(strokeWidth), strokeColor);
+    if (strokeWidth > 0) drawable.setStroke(sdp(strokeWidth), strokeColor);
     return drawable;
   }
 
@@ -744,9 +747,17 @@ public class FloatingAssistantService extends Service {
     return Math.max(min, Math.min(value, max));
   }
 
+  private int sdp(int value) {
+    return Math.max(1, Math.round(dp(value) * (assistantScale / 100f)));
+  }
+
+  private float scaledText(int value) {
+    return Math.max(8f, value * (assistantScale / 100f));
+  }
+
   private int getOverlayWidth() {
     int screenWidth = getResources().getDisplayMetrics().widthPixels;
-    return Math.min(dp(320), Math.max(dp(240), screenWidth - dp(36)));
+    return Math.min(sdp(320), Math.max(sdp(240), screenWidth - dp(36)));
   }
 
   private int getStatusBarHeight() {

@@ -1,54 +1,81 @@
 import React, { useEffect, useState } from 'react';
-import { View, StyleSheet, ActivityIndicator, Alert, AppState, Platform } from 'react-native';
+import { ActivityIndicator, AppState, Linking, Platform, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { StatusBar } from 'expo-status-bar';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { MainScreen } from './components/MainScreen';
 import { SettingsScreen } from './components/SettingsScreen';
 import { AssistantMode } from './components/AssistantMode';
 import { SpaceBackground } from './components/SpaceBackground';
+import { HomeScreen } from './components/HomeScreen';
+import { AppDrawer, ToolScreen } from './components/AppDrawer';
+import { ThemedModal } from './components/ThemedModal';
 import { useCookieTyper } from './hooks/useCookieTyper';
-import { StatusBar } from 'expo-status-bar';
-import AsyncStorage from '@react-native-async-storage/async-storage';
 import { FloatingAssistantNative, floatingAssistantEvents } from './native/FloatingAssistantNative';
 import { buildFloatingSession, MAIN_SESSION_STORAGE_KEY, persistFloatingSession } from './floatingSession';
+import { DEFAULT_SETTINGS } from './defaults';
+import { OperationLogItem } from './types';
 
-type AppScreen = 'main' | 'settings' | 'assistant';
+type AppScreen = ToolScreen | 'assistant';
+type NoticeState = { visible: boolean; title: string; message: string; confirmText?: string; onConfirm?: () => void };
 
-/**
- * Main Application Hub - CookieTyper
- */
+const OPERATIONS_STORAGE_KEY = 'cookies_recent_operations';
+const COOKIES_DISCORD_URL = 'https://discord.gg/cookiesteam';
+
 export default function App() {
-  const [screen, setScreen] = useState<AppScreen>('main');
-  const [previousScreen, setPreviousScreen] = useState<AppScreen>('main');
-  
-  const { 
-    settings, 
-    setSettings, 
-    session, 
-    parseText, 
-    nextBubble, 
-    prevBubble, 
-    goToBubble, 
+  const [screen, setScreen] = useState<AppScreen>('home');
+  const [previousScreen, setPreviousScreen] = useState<AppScreen>('home');
+  const [drawerVisible, setDrawerVisible] = useState(false);
+  const [notice, setNotice] = useState<NoticeState>({ visible: false, title: '', message: '' });
+  const [operations, setOperations] = useState<OperationLogItem[]>([]);
+
+  const {
+    settings,
+    setSettings,
+    session,
+    parseText,
+    nextBubble,
+    prevBubble,
+    goToBubble,
     setSession,
     updateAssistantMode,
-    isLoaded 
+    isLoaded,
   } = useCookieTyper();
 
   useEffect(() => {
-    if (!isLoaded || Platform.OS !== 'android' || settings.assistantMode) return;
+    AsyncStorage.getItem(OPERATIONS_STORAGE_KEY).then(saved => {
+      if (saved) setOperations(JSON.parse(saved));
+    }).catch(error => console.error('Failed to load recent operations', error));
+  }, []);
 
-    Alert.alert(
+  const addOperation = (item: Omit<OperationLogItem, 'id' | 'createdAt' | 'timeLabel'>) => {
+    const nextItem: OperationLogItem = {
+      ...item,
+      id: `${Date.now()}-${item.tool}`,
+      createdAt: Date.now(),
+      timeLabel: 'الآن',
+    };
+    setOperations(prev => {
+      const next = [nextItem, ...prev].slice(0, 5);
+      AsyncStorage.setItem(OPERATIONS_STORAGE_KEY, JSON.stringify(next));
+      return next;
+    });
+  };
+
+  const showNotice = (title: string, message: string, confirmText = 'حسنًا', onConfirm?: () => void) => {
+    setNotice({ visible: true, title, message, confirmText, onConfirm });
+  };
+
+  useEffect(() => {
+    if (!isLoaded || Platform.OS !== 'android' || settings.assistantMode) return;
+    showNotice(
       'وضع المساعد',
-      'اختر طريقة عمل المساعد على أندرويد. المساعد العائم يظهر فوق التطبيقات الأخرى، والداخلي يبقى داخل التطبيق مثل تجربة آيفون.',
-      [
-        {
-          text: 'اختيار المساعد الداخلي',
-          onPress: () => updateAssistantMode('inapp'),
-        },
-        {
-          text: 'اختيار المساعد العائم',
-          onPress: () => updateAssistantMode('floating'),
-        },
-      ],
-      { cancelable: false }
+      'اختر من إعدادات Typer طريقة عمل المساعد على أندرويد: العائم فوق التطبيقات الأخرى، أو الداخلي داخل التطبيق.',
+      'فتح الإعدادات',
+      () => {
+        updateAssistantMode('inapp');
+        setPreviousScreen(screen);
+        setScreen('settings');
+      }
     );
   }, [isLoaded, settings.assistantMode]);
 
@@ -58,10 +85,8 @@ export default function App() {
     const syncProgress = async () => {
       const savedSession = await AsyncStorage.getItem(MAIN_SESSION_STORAGE_KEY);
       if (!savedSession) return;
-
       try {
-        const parsedSession = JSON.parse(savedSession);
-        setSession(parsedSession);
+        setSession(JSON.parse(savedSession));
       } catch (error) {
         console.error('Failed to resync floating assistant progress', error);
       }
@@ -70,7 +95,6 @@ export default function App() {
     const applyFloatingIndex = async (currentIndex: number) => {
       const savedSession = await AsyncStorage.getItem(MAIN_SESSION_STORAGE_KEY);
       if (!savedSession) return;
-
       try {
         const parsedSession = JSON.parse(savedSession);
         parsedSession.currentIndex = currentIndex;
@@ -81,18 +105,12 @@ export default function App() {
       }
     };
 
-    const appStateSubscription = AppState.addEventListener('change', state => {
-      if (state === 'active') syncProgress();
-    });
+    const appStateSubscription = AppState.addEventListener('change', state => { if (state === 'active') syncProgress(); });
     const closeSubscription = floatingAssistantEvents?.addListener('FloatingAssistantClosed', syncProgress);
     const indexSubscription = floatingAssistantEvents?.addListener('FloatingAssistantIndexChanged', event => {
-      if (typeof event?.currentIndex === 'number') {
-        applyFloatingIndex(event.currentIndex);
-      }
+      if (typeof event?.currentIndex === 'number') applyFloatingIndex(event.currentIndex);
     });
-    const errorSubscription = floatingAssistantEvents?.addListener('FloatingAssistantError', event => {
-      console.error('Floating assistant native error', event);
-    });
+    const errorSubscription = floatingAssistantEvents?.addListener('FloatingAssistantError', event => console.error('Floating assistant native error', event));
 
     return () => {
       appStateSubscription.remove();
@@ -102,41 +120,26 @@ export default function App() {
     };
   }, [setSession]);
 
-  // Show a themed loader while persistent data is being fetched
   if (!isLoaded) {
-    return (
-      <View style={styles.loadingHost}>
-        <ActivityIndicator size="large" color="#F2A6B8" />
-      </View>
-    );
+    return <View style={styles.loadingHost}><ActivityIndicator size="large" color="#F2A6B8" /></View>;
   }
 
   const startFloatingAssistant = async (payload: string) => {
     const nextSession = parseText(payload);
     const floatingSession = buildFloatingSession(nextSession.bubbles, nextSession.currentIndex, settings);
-
     await AsyncStorage.setItem(MAIN_SESSION_STORAGE_KEY, JSON.stringify(nextSession));
     await persistFloatingSession(floatingSession);
+    addOperation({ tool: 'Typer', description: `آخر تشغيل: ${nextSession.bubbles.length} فقاعة` });
 
     if (!FloatingAssistantNative.isAvailable) {
-      Alert.alert(
-        'Development Build مطلوب',
-        'المساعد العائم يحتاج نسخة Expo Development Build تحتوي الوحدة الأصلية. سيتم فتح المساعد الداخلي الآن.'
-      );
+      showNotice('Development Build مطلوب', 'المساعد العائم يحتاج نسخة Expo Development Build تحتوي الوحدة الأصلية. سيتم فتح المساعد الداخلي الآن.');
       setScreen('assistant');
       return;
     }
 
     const hasPermission = await FloatingAssistantNative.hasOverlayPermission();
     if (!hasPermission) {
-      Alert.alert(
-        'إذن الظهور فوق التطبيقات',
-        'يحتاج CookieTyper إذن الظهور فوق التطبيقات لتشغيل المساعد العائم. فعّل الإذن ثم اضغط Start مرة أخرى.',
-        [
-          { text: 'إلغاء', style: 'cancel' },
-          { text: 'فتح الإعدادات', onPress: () => FloatingAssistantNative.openOverlaySettings() },
-        ]
-      );
+      showNotice('إذن الظهور فوق التطبيقات', 'يحتاج CookieTyper إذن الظهور فوق التطبيقات لتشغيل المساعد العائم. فعّل الإذن ثم اضغط Start مرة أخرى.', 'فتح الإعدادات', () => FloatingAssistantNative.openOverlaySettings());
       return;
     }
 
@@ -144,10 +147,7 @@ export default function App() {
       await FloatingAssistantNative.start(JSON.stringify(floatingSession));
     } catch (error) {
       console.error('Failed to start floating assistant', error);
-      Alert.alert(
-        'تعذر تشغيل المساعد العائم',
-        'حدث خطأ أثناء تشغيل النافذة العائمة. سيتم فتح المساعد الداخلي الآن حتى لا تفقد جلستك.'
-      );
+      showNotice('تعذر تشغيل المساعد العائم', 'حدث خطأ أثناء تشغيل النافذة العائمة. سيتم فتح المساعد الداخلي الآن حتى لا تفقد جلستك.');
       setScreen('assistant');
     }
   };
@@ -157,8 +157,8 @@ export default function App() {
       startFloatingAssistant(payload);
       return;
     }
-
-    parseText(payload);
+    const nextSession = parseText(payload);
+    addOperation({ tool: 'Typer', description: `آخر تشغيل: ${nextSession.bubbles.length} فقاعة` });
     setScreen('assistant');
   };
 
@@ -167,9 +167,7 @@ export default function App() {
     setScreen('settings');
   };
 
-  const navBackFromSettings = () => {
-    setScreen(previousScreen);
-  };
+  const navBackFromSettings = () => setScreen(previousScreen === 'settings' ? 'home' : previousScreen);
 
   const persistSettings = (config: any) => {
     setSettings(config);
@@ -178,65 +176,85 @@ export default function App() {
 
   const triggerFactoryReset = () => {
     setSettings({
-      fontSize: 18,
-      smartCleaner: true,
+      ...DEFAULT_SETTINGS,
       assistantMode: Platform.OS === 'android' ? settings.assistantMode || 'inapp' : 'inapp',
-      tags: [
-        { id: '1', symbol: '#', name: 'خارجي', color: '#ef4444' },
-        { id: '2', symbol: '*', name: 'جانبي', color: '#22c55e' },
-        { id: '3', symbol: '"', name: 'مؤثر', color: '#eab308' },
-      ],
     });
   };
+
+  const handleDrawerSelect = async (target: ToolScreen) => {
+    setDrawerVisible(false);
+    if (target === 'about') {
+      try {
+        await Linking.openURL(COOKIES_DISCORD_URL);
+      } catch (error) {
+        showNotice('Discord', 'تعذر فتح رابط سيرفر Cookies.');
+      }
+      return;
+    }
+    if (target === 'imageMerge') {
+      setScreen('imageMerge');
+      return;
+    }
+    if (target === 'settings') {
+      navToSettings();
+      return;
+    }
+    setScreen(target);
+  };
+
+  const activeDrawerScreen: ToolScreen = screen === 'assistant' ? 'typer' : (screen as ToolScreen);
 
   return (
     <SpaceBackground>
       <StatusBar style="light" />
       <View style={styles.viewPort}>
-        {/* Screen Routing Manager */}
-        {screen === 'main' && (
+        {screen === 'home' && <HomeScreen operations={operations} onOpenMenu={() => setDrawerVisible(true)} onOpenTyper={() => setScreen('typer')} />}
+
+        {screen === 'typer' && (
           <MainScreen
             inputText={session.inputText}
             onStart={handleStartRequested}
             onOpenSettings={navToSettings}
+            onOpenMenu={() => setDrawerVisible(true)}
+            onBackHome={() => setScreen('home')}
             bubbleCount={session.bubbles.length}
             settings={settings}
           />
         )}
 
         {screen === 'settings' && (
-          <SettingsScreen
-            settings={settings}
-            onSave={persistSettings}
-            onReset={triggerFactoryReset}
-            onAssistantModeChange={updateAssistantMode}
-            onClose={navBackFromSettings}
-          />
+          <SettingsScreen settings={settings} onSave={persistSettings} onReset={triggerFactoryReset} onAssistantModeChange={updateAssistantMode} onClose={navBackFromSettings} />
         )}
 
-        {screen === 'assistant' && (
-          <AssistantMode
-            session={session}
-            settings={settings}
-            onNext={nextBubble}
-            onPrev={prevBubble}
-            onGoTo={goToBubble}
-            onClose={() => setScreen('main')}
-          />
+        {screen === 'assistant' && <AssistantMode session={session} settings={settings} onNext={nextBubble} onPrev={prevBubble} onGoTo={goToBubble} onClose={() => setScreen('typer')} />}
+
+        {screen === 'imageMerge' && (
+          <View style={styles.placeholderScreen}>
+            <Text style={styles.placeholderTitle}>دمج الصور</Text>
+            <Text style={styles.placeholderText}>هذه أداة مستقبلية مستقلة لا تؤثر على Typer. سيتم لاحقًا دعم اختيار الصور، ترتيبها، دمجها، وحفظ الناتج.</Text>
+            <TouchableOpacity onPress={() => setDrawerVisible(true)} style={styles.placeholderButton}><Text style={styles.placeholderButtonText}>فتح القائمة</Text></TouchableOpacity>
+          </View>
         )}
       </View>
+      <AppDrawer visible={drawerVisible} active={activeDrawerScreen} onClose={() => setDrawerVisible(false)} onSelect={handleDrawerSelect} />
+      <ThemedModal
+        visible={notice.visible}
+        title={notice.title}
+        message={notice.message}
+        confirmText={notice.confirmText || 'حسنًا'}
+        onConfirm={() => { const cb = notice.onConfirm; setNotice(prev => ({ ...prev, visible: false })); cb?.(); }}
+        onCancel={() => setNotice(prev => ({ ...prev, visible: false }))}
+      />
     </SpaceBackground>
   );
 }
 
 const styles = StyleSheet.create({
-  loadingHost: {
-    flex: 1,
-    backgroundColor: '#020202',
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  viewPort: {
-    flex: 1,
-  },
+  loadingHost: { flex: 1, backgroundColor: '#020202', justifyContent: 'center', alignItems: 'center' },
+  viewPort: { flex: 1 },
+  placeholderScreen: { flex: 1, justifyContent: 'center', padding: 24 },
+  placeholderTitle: { color: 'white', fontSize: 30, fontWeight: '900', textAlign: 'right' },
+  placeholderText: { color: 'rgba(255,255,255,0.56)', fontSize: 14, lineHeight: 24, textAlign: 'right', marginTop: 12 },
+  placeholderButton: { marginTop: 18, backgroundColor: '#F2A6B8', borderRadius: 18, padding: 14, alignItems: 'center' },
+  placeholderButtonText: { color: 'white', fontWeight: '900' },
 });

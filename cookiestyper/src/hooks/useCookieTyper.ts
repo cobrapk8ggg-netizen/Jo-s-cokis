@@ -3,17 +3,7 @@ import { Platform } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Settings, SessionData, BubbleType, AssistantModePreference } from '../types';
 import { ASSISTANT_MODE_STORAGE_KEY, MAIN_SESSION_STORAGE_KEY } from '../floatingSession';
-
-const DEFAULT_SETTINGS: Settings = {
-  fontSize: 18,
-  smartCleaner: true,
-  assistantMode: Platform.OS === 'android' ? null : 'inapp',
-  tags: [
-    { id: '1', symbol: '#', name: 'خارجي', color: '#ef4444' },
-    { id: '2', symbol: '*', name: 'جانبي', color: '#22c55e' },
-    { id: '3', symbol: '"', name: 'مؤثر', color: '#eab308' },
-  ],
-};
+import { DEFAULT_SETTINGS, clampAssistantScale, mergeMissingDefaultTags } from '../defaults';
 
 const DEFAULT_SESSION: SessionData = {
   bubbles: [],
@@ -39,6 +29,8 @@ export function useCookieTyper() {
           setSettings({
             ...DEFAULT_SETTINGS,
             ...parsedSettings,
+            assistantScale: clampAssistantScale(parsedSettings.assistantScale),
+            tags: mergeMissingDefaultTags(parsedSettings.tags),
             assistantMode: Platform.OS === 'android'
               ? savedAssistantMode || parsedSettings.assistantMode || null
               : 'inapp',
@@ -103,7 +95,7 @@ export function useCookieTyper() {
       let finalContent = trimmedLine;
 
       // Check for tags at the beginning of the line
-      for (const tag of settings.tags) {
+      for (const tag of [...settings.tags].sort((a, b) => b.symbol.length - a.symbol.length)) {
         if (tag.symbol && trimmedLine.startsWith(tag.symbol)) {
           matchedTagId = tag.id;
           finalContent = trimmedLine.slice(tag.symbol.length).trim();

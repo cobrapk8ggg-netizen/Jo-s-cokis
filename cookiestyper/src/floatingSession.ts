@@ -1,5 +1,6 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { BubbleType, Settings } from './types';
+import { clampAssistantScale } from './defaults';
 
 export const ASSISTANT_MODE_STORAGE_KEY = 'assistantMode';
 export const FLOATING_SESSION_STORAGE_KEY = 'cookie_typer_floating_session';
@@ -13,12 +14,15 @@ export type FloatingAssistantElement = {
   originalLine: string;
   type: string;
   color: string;
+  fontName?: string;
+  fontUri?: string;
 };
 
 export type FloatingAssistantSession = {
   elements: FloatingAssistantElement[];
   currentIndex: number;
   fontSize: number;
+  assistantScale: number;
   smartCleaner: boolean;
   updatedAt: number;
 };
@@ -41,10 +45,13 @@ export function buildFloatingSession(
         originalLine: bubble.originalText,
         type: tag?.name || 'عادي',
         color: tag?.color || '#F2A6B8',
+        fontName: tag?.fontName,
+        fontUri: tag?.fontUri,
       };
     }),
     currentIndex,
     fontSize: clampFloatingFontSize(settings.fontSize),
+    assistantScale: clampAssistantScale(settings.assistantScale),
     smartCleaner: settings.smartCleaner,
     updatedAt: Date.now(),
   };

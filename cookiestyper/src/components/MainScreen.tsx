@@ -12,7 +12,7 @@ import {
   Easing,
   StatusBar as RNStatusBar
 } from 'react-native';
-import { Settings as SettingsIcon, Play } from 'lucide-react-native';
+import { ChevronRight, Menu, Settings as SettingsIcon, Play } from 'lucide-react-native';
 import { Settings } from '../types';
 
 const COOKIES_PINK = '#F2A6B8';
@@ -22,6 +22,8 @@ interface MainScreenProps {
   inputText: string;
   onStart: (text: string) => void;
   onOpenSettings: () => void;
+  onOpenMenu?: () => void;
+  onBackHome?: () => void;
   bubbleCount: number;
   settings: Settings;
 }
@@ -30,6 +32,8 @@ export const MainScreen: React.FC<MainScreenProps> = ({
   inputText: initialText, 
   onStart, 
   onOpenSettings,
+  onOpenMenu,
+  onBackHome,
   bubbleCount,
   settings
 }) => {
@@ -198,12 +202,20 @@ export const MainScreen: React.FC<MainScreenProps> = ({
             },
           ]}
         >
+          <TouchableOpacity onPress={onOpenMenu} style={styles.menuButton} activeOpacity={0.85}>
+            <Menu color="white" size={22} />
+          </TouchableOpacity>
+
           <View style={styles.titleGroup}>
             <View style={styles.counterBadge}>
               <Text style={styles.counterText}>{bubbleCount || 0}</Text>
             </View>
             <Text style={styles.brandTitle}>CookieTyper</Text>
           </View>
+
+          <TouchableOpacity onPress={onBackHome} style={styles.menuButton} activeOpacity={0.85}>
+            <ChevronRight color="white" size={22} />
+          </TouchableOpacity>
         </Animated.View>
 
         {/* Glossy Text Input Container */}
@@ -343,6 +355,16 @@ const styles = StyleSheet.create({
     flexDirection: 'row-reverse',
     alignItems: 'center',
     justifyContent: 'space-between',
+  },
+  menuButton: {
+    width: 42,
+    height: 42,
+    borderRadius: 16,
+    backgroundColor: 'rgba(255,255,255,0.07)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.1)',
+    justifyContent: 'center',
+    alignItems: 'center',
   },
   titleGroup: {
     flexDirection: 'row-reverse',
