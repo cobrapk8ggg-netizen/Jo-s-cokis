@@ -1,10 +1,13 @@
 import { useState, useEffect } from 'react';
+import { Platform } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { Settings, SessionData, BubbleType } from '../types';
+import { Settings, SessionData, BubbleType, AssistantModePreference } from '../types';
+import { ASSISTANT_MODE_STORAGE_KEY, MAIN_SESSION_STORAGE_KEY } from '../floatingSession';
 
 const DEFAULT_SETTINGS: Settings = {
   fontSize: 18,
   smartCleaner: true,
+  assistantMode: Platform.OS === 'android' ? null : 'inapp',
   tags: [
     { id: '1', symbol: '#', name: 'خارجي', color: '#ef4444' },
     { id: '2', symbol: '*', name: 'جانبي', color: '#22c55e' },
@@ -28,9 +31,25 @@ export function useCookieTyper() {
     async function loadData() {
       try {
         const savedSettings = await AsyncStorage.getItem('cookie_typer_settings');
-        const savedSession = await AsyncStorage.getItem('cookie_typer_session');
+        const savedSession = await AsyncStorage.getItem(MAIN_SESSION_STORAGE_KEY);
+        const savedAssistantMode = await AsyncStorage.getItem(ASSISTANT_MODE_STORAGE_KEY) as AssistantModePreference | null;
         
-        if (savedSettings) setSettings(JSON.parse(savedSettings));
+        if (savedSettings) {
+          const parsedSettings = JSON.parse(savedSettings);
+          setSettings({
+            ...DEFAULT_SETTINGS,
+            ...parsedSettings,
+            assistantMode: Platform.OS === 'android'
+              ? savedAssistantMode || parsedSettings.assistantMode || null
+              : 'inapp',
+          });
+        } else {
+          setSettings({
+            ...DEFAULT_SETTINGS,
+            assistantMode: Platform.OS === 'android' ? savedAssistantMode : 'inapp',
+          });
+        }
+
         if (savedSession) setSession(JSON.parse(savedSession));
       } catch (e) {
         console.error('Failed to load storage', e);
@@ -48,10 +67,17 @@ export function useCookieTyper() {
     }
   }, [settings, isLoaded]);
 
+  // Persist assistant mode in its own stable key for native/floating lookups
+  useEffect(() => {
+    if (isLoaded && Platform.OS === 'android' && settings.assistantMode) {
+      AsyncStorage.setItem(ASSISTANT_MODE_STORAGE_KEY, settings.assistantMode);
+    }
+  }, [settings.assistantMode, isLoaded]);
+
   // Persist session changes
   useEffect(() => {
     if (isLoaded) {
-      AsyncStorage.setItem('cookie_typer_session', JSON.stringify(session));
+      AsyncStorage.setItem(MAIN_SESSION_STORAGE_KEY, JSON.stringify(session));
     }
   }, [session, isLoaded]);
 
@@ -68,7 +94,7 @@ export function useCookieTyper() {
       .trim();
   };
 
-  const parseText = (text: string) => {
+  const buildSessionFromText = (text: string): SessionData => {
     // Each non-empty line is a bubble
     const lines = text.split('\n').filter(line => line.trim().length > 0);
     const parsedBubbles: BubbleType[] = lines.map(line => {
@@ -92,14 +118,22 @@ export function useCookieTyper() {
       };
     });
 
-    setSession(prev => ({
-      ...prev,
+    return {
       bubbles: parsedBubbles,
       inputText: text,
-      currentIndex: prev.inputText === text && prev.bubbles.length > 0
-        ? Math.min(prev.currentIndex, parsedBubbles.length - 1)
+      currentIndex: session.inputText === text && session.bubbles.length > 0
+        ? Math.min(session.currentIndex, parsedBubbles.length - 1)
         : 0,
+    };
+  };
+
+  const parseText = (text: string) => {
+    const nextSession = buildSessionFromText(text);
+    setSession(prev => ({
+      ...prev,
+      ...nextSession,
     }));
+    return nextSession;
   };
 
   const nextBubble = () => {
@@ -125,6 +159,13 @@ export function useCookieTyper() {
     }
   };
 
+  const updateAssistantMode = (assistantMode: AssistantModePreference) => {
+    setSettings(prev => ({
+      ...prev,
+      assistantMode,
+    }));
+  };
+
   const resetSession = () => {
     setSession(DEFAULT_SESSION);
   };
@@ -132,9 +173,11 @@ export function useCookieTyper() {
   return {
     settings,
     setSettings,
+    updateAssistantMode,
     session,
     setSession,
     parseText,
+    buildSessionFromText,
     nextBubble,
     prevBubble,
     goToBubble,

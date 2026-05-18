@@ -8,14 +8,15 @@ import {
   SafeAreaView, 
   KeyboardAvoidingView, 
   Platform,
-  Dimensions,
   Animated,
-  Easing
+  Easing,
+  StatusBar as RNStatusBar
 } from 'react-native';
 import { Settings as SettingsIcon, Play } from 'lucide-react-native';
 import { Settings } from '../types';
 
-const { width } = Dimensions.get('window');
+const COOKIES_PINK = '#F2A6B8';
+const COOKIES_PINK_DARK = '#C96F86';
 
 interface MainScreenProps {
   inputText: string;
@@ -43,32 +44,29 @@ export const MainScreen: React.FC<MainScreenProps> = ({
   const settingsScale = useRef(new Animated.Value(1)).current;
   const settingsRotate = useRef(new Animated.Value(0)).current;
 
-  // Determine if it's a tablet or phone for layout scaling
-  const isTablet = width > 768;
-
   useEffect(() => {
-    Animated.stagger(90, [
+    Animated.stagger(45, [
       Animated.timing(headerAnim, {
         toValue: 1,
-        duration: 520,
+        duration: 240,
         easing: Easing.out(Easing.cubic),
         useNativeDriver: true,
       }),
       Animated.timing(inputAnim, {
         toValue: 1,
-        duration: 620,
+        duration: 280,
         easing: Easing.out(Easing.cubic),
         useNativeDriver: true,
       }),
       Animated.timing(actionsAnim, {
         toValue: 1,
-        duration: 520,
+        duration: 240,
         easing: Easing.out(Easing.cubic),
         useNativeDriver: true,
       }),
       Animated.timing(footerAnim, {
         toValue: 1,
-        duration: 420,
+        duration: 220,
         easing: Easing.out(Easing.cubic),
         useNativeDriver: true,
       }),
@@ -79,7 +77,7 @@ export const MainScreen: React.FC<MainScreenProps> = ({
     const cleanHex = hex.replace('#', '');
 
     if (cleanHex.length !== 6) {
-      return `rgba(168,85,247,${alpha})`;
+      return `rgba(242,166,184,${alpha})`;
     }
 
     const red = parseInt(cleanHex.substring(0, 2), 16);
@@ -126,52 +124,37 @@ export const MainScreen: React.FC<MainScreenProps> = ({
     if (!text.trim()) return;
 
     Animated.sequence([
-      Animated.spring(startScale, {
-        toValue: 0.94,
+      Animated.timing(startScale, {
+        toValue: 0.97,
+        duration: 70,
         useNativeDriver: true,
-        friction: 5,
-        tension: 140,
       }),
-      Animated.spring(startScale, {
-        toValue: 1.04,
-        useNativeDriver: true,
-        friction: 5,
-        tension: 140,
-      }),
-      Animated.spring(startScale, {
+      Animated.timing(startScale, {
         toValue: 1,
+        duration: 90,
         useNativeDriver: true,
-        friction: 6,
-        tension: 120,
       }),
-    ]).start(() => onStart(text));
+    ]).start();
+    onStart(text);
   };
 
   const handleSettingsPress = () => {
     settingsRotate.setValue(0);
+    onOpenSettings();
 
     Animated.parallel([
-      Animated.sequence([
-        Animated.spring(settingsScale, {
-          toValue: 0.88,
-          useNativeDriver: true,
-          friction: 5,
-          tension: 160,
-        }),
-        Animated.spring(settingsScale, {
-          toValue: 1,
-          useNativeDriver: true,
-          friction: 5,
-          tension: 140,
-        }),
-      ]),
+      Animated.timing(settingsScale, {
+        toValue: 0.94,
+        duration: 80,
+        useNativeDriver: true,
+      }),
       Animated.timing(settingsRotate, {
         toValue: 1,
-        duration: 320,
+        duration: 160,
         easing: Easing.out(Easing.cubic),
         useNativeDriver: true,
       }),
-    ]).start(() => onOpenSettings());
+    ]).start(() => settingsScale.setValue(1));
   };
 
   const headerTranslateY = headerAnim.interpolate({
@@ -219,7 +202,7 @@ export const MainScreen: React.FC<MainScreenProps> = ({
             <View style={styles.counterBadge}>
               <Text style={styles.counterText}>{bubbleCount || 0}</Text>
             </View>
-            <Text style={styles.brandTitle}>CookieTyper</Text>
+            <Text style={styles.brandTitle}>CookiesTyper</Text>
           </View>
         </Animated.View>
 
@@ -267,7 +250,7 @@ export const MainScreen: React.FC<MainScreenProps> = ({
                 text.length > 0 && styles.transparentTextInput
               ]}
               textAlignVertical="top"
-              selectionColor="#a855f7"
+              selectionColor={COOKIES_PINK}
             />
           </View>
         </Animated.View>
@@ -298,7 +281,7 @@ export const MainScreen: React.FC<MainScreenProps> = ({
                 },
               ]}
             >
-              <Play color="white" size={26} fill="white" />
+              <Play color="white" size={22} fill="white" />
               <Text style={styles.startBtnText}>START</Text>
             </Animated.View>
           </TouchableOpacity>
@@ -319,7 +302,7 @@ export const MainScreen: React.FC<MainScreenProps> = ({
                 },
               ]}
             >
-              <SettingsIcon color="white" size={28} strokeWidth={2.5} />
+              <SettingsIcon color="white" size={24} strokeWidth={2.5} />
             </Animated.View>
           </TouchableOpacity>
         </Animated.View>
@@ -350,12 +333,13 @@ const styles = StyleSheet.create({
   },
   container: {
     flex: 1,
-    paddingHorizontal: 20,
-    paddingBottom: 20,
+    paddingHorizontal: 18,
+    paddingTop: Platform.OS === 'android' ? (RNStatusBar.currentHeight || 0) + 8 : 0,
+    paddingBottom: Platform.OS === 'android' ? 14 : 18,
   },
   header: {
-    marginTop: 20,
-    marginBottom: 24,
+    marginTop: 8,
+    marginBottom: 14,
     flexDirection: 'row-reverse',
     alignItems: 'center',
     justifyContent: 'space-between',
@@ -363,33 +347,33 @@ const styles = StyleSheet.create({
   titleGroup: {
     flexDirection: 'row-reverse',
     alignItems: 'center',
-    gap: 16,
+    gap: 12,
   },
   counterBadge: {
     backgroundColor: 'rgba(0,0,0,0.85)',
-    paddingHorizontal: 14,
-    paddingVertical: 5,
+    paddingHorizontal: 12,
+    paddingVertical: 4,
     borderRadius: 14,
     borderWidth: 1.5,
-    borderColor: 'rgba(168,85,247,0.3)',
+    borderColor: 'rgba(242,166,184,0.34)',
     minWidth: 50,
     alignItems: 'center',
   },
   counterText: {
-    color: '#a855f7',
+    color: COOKIES_PINK,
     fontWeight: '900',
-    fontSize: 16,
+    fontSize: 15,
     fontFamily: Platform.OS === 'ios' ? 'Avenir-Heavy' : 'sans-serif-medium',
   },
   brandTitle: {
     color: 'white',
-    fontSize: 34,
+    fontSize: 31,
     fontWeight: '900',
     letterSpacing: -0.5,
   },
   inputAreaContainer: {
     flex: 1,
-    borderRadius: 28,
+    borderRadius: 24,
     borderWidth: 1.5,
     borderColor: 'rgba(255,255,255,0.08)',
     overflow: 'hidden',
@@ -397,14 +381,14 @@ const styles = StyleSheet.create({
   },
   inputGlassLayer: {
     flex: 1,
-    padding: 20,
+    padding: 16,
     position: 'relative',
   },
   highlightLayer: {
     position: 'absolute',
-    top: 20,
-    left: 20,
-    right: 20,
+    top: 16,
+    left: 16,
+    right: 16,
     zIndex: 1,
   },
   highlightLineWrapper: {
@@ -439,23 +423,23 @@ const styles = StyleSheet.create({
   },
   actionRow: {
     flexDirection: 'row-reverse',
-    marginTop: 24,
-    gap: 14,
+    marginTop: 14,
+    gap: 12,
   },
   startBtn: {
     flex: 1,
     flexDirection: 'row-reverse',
-    backgroundColor: '#7c3aed',
-    height: 72,
-    borderRadius: 22,
+    backgroundColor: COOKIES_PINK,
+    height: 60,
+    borderRadius: 18,
     alignItems: 'center',
     justifyContent: 'center',
-    gap: 14,
-    shadowColor: '#7c3aed',
-    shadowOffset: { width: 0, height: 8 },
-    shadowOpacity: 0.3,
-    shadowRadius: 15,
-    elevation: 8,
+    gap: 10,
+    shadowColor: COOKIES_PINK_DARK,
+    shadowOffset: { width: 0, height: 6 },
+    shadowOpacity: 0.22,
+    shadowRadius: 10,
+    elevation: 5,
   },
   disabledStartBtn: {
     backgroundColor: 'rgba(255,255,255,0.05)',
@@ -465,22 +449,22 @@ const styles = StyleSheet.create({
   },
   startBtnText: {
     color: 'white',
-    fontSize: 22,
+    fontSize: 19,
     fontWeight: '900',
-    letterSpacing: 6,
+    letterSpacing: 5,
   },
   settingsIconBtn: {
-    width: 72,
-    height: 72,
+    width: 60,
+    height: 60,
     backgroundColor: 'rgba(255,255,255,0.08)',
-    borderRadius: 22,
+    borderRadius: 18,
     alignItems: 'center',
     justifyContent: 'center',
     borderWidth: 1.5,
     borderColor: 'rgba(255,255,255,0.12)',
   },
   footerInfo: {
-    marginTop: 20,
+    marginTop: 10,
     alignItems: 'center',
   },
   discordInfo: {

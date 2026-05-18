@@ -9,15 +9,19 @@ import {
   SafeAreaView, 
   Platform,
   Alert,
-  Dimensions,
+  StatusBar as RNStatusBar,
   Animated,
   Linking
 } from 'react-native';
-import * as Clipboard from 'expo-clipboard';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Trash2, Plus, ChevronRight, Disc as DiscordIcon } from 'lucide-react-native';
-import { Settings, TagType } from '../types';
+import { AssistantModePreference, Settings, TagType } from '../types';
+import { ASSISTANT_MODE_STORAGE_KEY } from '../floatingSession';
 
-const { width } = Dimensions.get('window');
+const COOKIES_PINK = '#F2A6B8';
+const COOKIES_PINK_GLOW = '#FFD1DC';
+const COOKIES_PINK_DARK = '#C96F86';
+const COOKIES_DISCORD_URL = 'https://discord.gg/cookiesteam';
 
 const FONT_MIN = 12;
 const FONT_MAX = 36;
@@ -41,6 +45,7 @@ interface SettingsScreenProps {
   settings: Settings;
   onSave: (settings: Settings) => void;
   onReset: () => void;
+  onAssistantModeChange?: (assistantMode: AssistantModePreference) => void;
   onClose: () => void;
 }
 
@@ -48,6 +53,7 @@ export const SettingsScreen: React.FC<SettingsScreenProps> = ({
   settings: initialSettings,
   onSave,
   onReset,
+  onAssistantModeChange,
   onClose
 }) => {
   const [settings, setSettings] = React.useState<Settings>(initialSettings);
@@ -69,7 +75,7 @@ export const SettingsScreen: React.FC<SettingsScreenProps> = ({
       id: Date.now().toString(),
       symbol: '',
       name: '',
-      color: '#A855F7'
+      color: COOKIES_PINK
     };
     setSettings(prev => ({ ...prev, tags: [...prev.tags, newTag] }));
     setSelectedColorTagId(newTag.id);
@@ -105,27 +111,23 @@ export const SettingsScreen: React.FC<SettingsScreenProps> = ({
     }));
   };
 
+  const updateAssistantMode = async (assistantMode: AssistantModePreference) => {
+    setSettings(prev => ({ ...prev, assistantMode }));
+    onAssistantModeChange?.(assistantMode);
+    await AsyncStorage.setItem(ASSISTANT_MODE_STORAGE_KEY, assistantMode);
+  };
+
   const handleDiscordPress = async () => {
-    await Clipboard.setStringAsync('yassiniq');
-
-    const discordAppUrl = 'discord://';
-    const discordWebUrl = 'https://discord.com/app';
-
     try {
-      const canOpenDiscord = await Linking.canOpenURL(discordAppUrl);
-      if (canOpenDiscord) {
-        await Linking.openURL(discordAppUrl);
-      } else {
-        await Linking.openURL(discordWebUrl);
-      }
+      await Linking.openURL(COOKIES_DISCORD_URL);
     } catch (e) {
-      Alert.alert('Copied', 'تم نسخ yassiniq');
+      Alert.alert('Discord', 'تعذر فتح رابط سيرفر Cookies.');
     }
   };
 
   const toggleTranslateX = toggleAnim.interpolate({
     inputRange: [0, 1],
-    outputRange: [26, 0],
+    outputRange: [22, 0],
   });
 
   return (
@@ -133,7 +135,7 @@ export const SettingsScreen: React.FC<SettingsScreenProps> = ({
       {/* Header Container */}
       <View style={styles.topHeader}>
         <TouchableOpacity onPress={onClose} style={styles.backBtn}>
-          <ChevronRight color="white" size={28} />
+          <ChevronRight color="white" size={24} />
         </TouchableOpacity>
         <Text style={styles.headerTitle}>Settings</Text>
       </View>
@@ -187,7 +189,7 @@ export const SettingsScreen: React.FC<SettingsScreenProps> = ({
                 <View style={styles.tagRow}>
                   {/* Trash Icon */}
                   <TouchableOpacity onPress={() => removeTag(tag.id)} style={styles.iconAction}>
-                    <Trash2 color="#f43f5e" size={20} />
+                    <Trash2 color="#f43f5e" size={18} />
                   </TouchableOpacity>
                   
                   {/* Symbol Input */}
@@ -238,7 +240,7 @@ export const SettingsScreen: React.FC<SettingsScreenProps> = ({
             ))}
 
             <TouchableOpacity onPress={addTag} style={styles.plusBtn}>
-              <Plus color="rgba(255,255,255,0.4)" size={20} strokeWidth={3} />
+              <Plus color="rgba(255,255,255,0.4)" size={18} strokeWidth={3} />
               <Text style={styles.plusBtnText}>+ إضافة علامة</Text>
             </TouchableOpacity>
           </View>
@@ -259,18 +261,52 @@ export const SettingsScreen: React.FC<SettingsScreenProps> = ({
           </View>
         </TouchableOpacity>
 
+        {Platform.OS === 'android' && (
+          <View style={styles.card}>
+            <Text style={styles.cardTitle}>وضع المساعد</Text>
+            <Text style={styles.assistantModeDesc}>
+              اختر طريقة فتح الجلسة القادمة عند الضغط على START. لا يؤثر هذا على جلسة مفتوحة حالياً.
+            </Text>
+            <View style={styles.assistantModeOptions}>
+              <TouchableOpacity
+                activeOpacity={0.85}
+                onPress={() => updateAssistantMode('floating')}
+                style={[
+                  styles.assistantModeOption,
+                  settings.assistantMode === 'floating' && styles.activeAssistantModeOption,
+                ]}
+              >
+                <Text style={styles.assistantModeTitle}>عائم</Text>
+                <Text style={styles.assistantModeHint}>فوق التطبيقات الأخرى</Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                activeOpacity={0.85}
+                onPress={() => updateAssistantMode('inapp')}
+                style={[
+                  styles.assistantModeOption,
+                  (settings.assistantMode || 'inapp') === 'inapp' && styles.activeAssistantModeOption,
+                ]}
+              >
+                <Text style={styles.assistantModeTitle}>داخلي</Text>
+                <Text style={styles.assistantModeHint}>داخل CookiesTyper</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        )}
+
         {/* Official Discord Card */}
         <TouchableOpacity activeOpacity={0.85} onPress={handleDiscordPress} style={styles.discordCard}>
           <View style={styles.discordIconWrapper}>
-            <DiscordIcon color="#6366f1" size={24} />
+            <DiscordIcon color={COOKIES_PINK_DARK} size={21} />
           </View>
           <View style={styles.discordMeta}>
             <Text style={styles.discordLabel}>إبلاغ عن مشكلة /! إرسال اقتراح</Text>
-            <Text style={styles.discordSubLabel}>Copy yassiniq' & Open Discord</Text>
+            <Text style={styles.discordSubLabel}>Open Cookies Discord Server</Text>
           </View>
         </TouchableOpacity>
 
-        <View style={{ height: 160 }} />
+        <View style={{ height: Platform.OS === 'ios' ? 132 : 118 }} />
       </ScrollView>
 
       {/* Persistent Action Bar */}
@@ -312,46 +348,48 @@ const styles = StyleSheet.create({
     flexDirection: 'row-reverse',
     justifyContent: 'space-between',
     alignItems: 'center',
-    padding: 24,
+    paddingHorizontal: 18,
+    paddingTop: Platform.OS === 'android' ? (RNStatusBar.currentHeight || 0) + 8 : 18,
+    paddingBottom: 10,
   },
   headerTitle: {
     color: 'white',
-    fontSize: 34,
+    fontSize: 30,
     fontWeight: '900',
   },
   backBtn: {
-    padding: 10,
+    padding: 8,
     backgroundColor: 'rgba(255,255,255,0.06)',
     borderRadius: 100,
     borderWidth: 1,
     borderColor: 'rgba(255,255,255,0.1)',
   },
   scrollArea: {
-    paddingHorizontal: 24,
-    paddingTop: 8,
+    paddingHorizontal: 18,
+    paddingTop: 4,
   },
   card: {
     backgroundColor: 'rgba(15,15,15,0.6)',
-    borderRadius: 26,
-    padding: 24,
+    borderRadius: 20,
+    padding: 14,
     borderWidth: 1.5,
     borderColor: 'rgba(255,255,255,0.08)',
-    marginBottom: 18,
+    marginBottom: 12,
   },
   cardHeader: {
     flexDirection: 'row-reverse',
     justifyContent: 'space-between',
     alignItems: 'center',
-    marginBottom: 20,
+    marginBottom: 14,
   },
   cardLabel: {
     color: 'rgba(255,255,255,0.7)',
-    fontSize: 17,
+    fontSize: 14,
     fontWeight: '600',
   },
   cardValue: {
-    color: '#a855f7',
-    fontSize: 18,
+    color: COOKIES_PINK,
+    fontSize: 15,
     fontWeight: '900',
     fontFamily: Platform.OS === 'ios' ? 'Courier-Bold' : 'monospace',
   },
@@ -359,7 +397,7 @@ const styles = StyleSheet.create({
     paddingVertical: 8,
   },
   rangeTrack: {
-    height: 18,
+    height: 14,
     backgroundColor: 'rgba(255,255,255,0.08)',
     borderRadius: 10,
     overflow: 'visible',
@@ -367,60 +405,60 @@ const styles = StyleSheet.create({
   },
   rangeProgress: {
     height: 6,
-    backgroundColor: '#9333ea',
+    backgroundColor: COOKIES_PINK_DARK,
     borderRadius: 10,
   },
   rangeThumb: {
     position: 'absolute',
-    width: 22,
-    height: 22,
-    marginLeft: -11,
+    width: 18,
+    height: 18,
+    marginLeft: -9,
     borderRadius: 100,
-    backgroundColor: '#d8b4fe',
+    backgroundColor: COOKIES_PINK_GLOW,
     borderWidth: 3,
-    borderColor: '#7c3aed',
-    shadowColor: '#a855f7',
+    borderColor: COOKIES_PINK_DARK,
+    shadowColor: COOKIES_PINK_DARK,
     shadowOffset: { width: 0, height: 0 },
-    shadowOpacity: 0.55,
-    shadowRadius: 8,
+    shadowOpacity: 0.36,
+    shadowRadius: 6,
     elevation: 5,
   },
   rangeTicks: {
     flexDirection: 'row',
     justifyContent: 'space-between',
-    marginTop: 18,
+    marginTop: 12,
   },
   tickBtn: {
     padding: 6,
   },
   tickLabel: {
     color: 'rgba(255,255,255,0.25)',
-    fontSize: 13,
+    fontSize: 12,
     fontWeight: '700',
   },
   activeTick: {
-    color: '#d8b4fe',
+    color: COOKIES_PINK_GLOW,
   },
   cardTitle: {
     color: 'white',
-    fontSize: 20,
+    fontSize: 16,
     fontWeight: '900',
-    marginBottom: 24,
+    marginBottom: 16,
     textAlign: 'right',
   },
   tagsContainer: {
-    gap: 14,
+    gap: 8,
   },
   tagBlock: {
-    gap: 10,
+    gap: 8,
   },
   tagRow: {
     flexDirection: 'row-reverse',
     alignItems: 'center',
-    gap: 12,
+    gap: 10,
     backgroundColor: 'rgba(255,255,255,0.04)',
-    padding: 12,
-    borderRadius: 18,
+    padding: 9,
+    borderRadius: 15,
     borderWidth: 1,
     borderColor: 'rgba(255,255,255,0.04)',
   },
@@ -428,13 +466,13 @@ const styles = StyleSheet.create({
     padding: 6,
   },
   symbolInput: {
-    width: 65,
+    width: 56,
     backgroundColor: 'rgba(0,0,0,0.4)',
     color: 'white',
     textAlign: 'center',
     borderRadius: 10,
-    paddingVertical: 10,
-    fontSize: 15,
+    paddingVertical: 8,
+    fontSize: 14,
     fontWeight: 'bold',
   },
   nameInput: {
@@ -443,16 +481,16 @@ const styles = StyleSheet.create({
     color: 'white',
     textAlign: 'right',
     borderRadius: 10,
-    paddingHorizontal: 14,
-    paddingVertical: 10,
-    fontSize: 16,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    fontSize: 15,
   },
   colorIndicatorRow: {
     padding: 4,
   },
   colorBox: {
-    width: 22,
-    height: 22,
+    width: 20,
+    height: 20,
     borderRadius: 6,
     borderWidth: 2,
     borderColor: 'rgba(255,255,255,0.15)',
@@ -460,16 +498,16 @@ const styles = StyleSheet.create({
   colorPalette: {
     flexDirection: 'row-reverse',
     flexWrap: 'wrap',
-    gap: 10,
+    gap: 8,
     backgroundColor: 'rgba(255,255,255,0.035)',
-    padding: 14,
-    borderRadius: 18,
+    padding: 10,
+    borderRadius: 15,
     borderWidth: 1,
     borderColor: 'rgba(255,255,255,0.06)',
   },
   colorOption: {
-    width: 28,
-    height: 28,
+    width: 20,
+    height: 20,
     borderRadius: 9,
     borderWidth: 2,
     borderColor: 'rgba(255,255,255,0.12)',
@@ -482,17 +520,17 @@ const styles = StyleSheet.create({
     flexDirection: 'row-reverse',
     alignItems: 'center',
     justifyContent: 'center',
-    padding: 18,
+    padding: 13,
     borderWidth: 1.5,
     borderStyle: 'dashed',
     borderColor: 'rgba(255,255,255,0.15)',
-    borderRadius: 18,
-    gap: 12,
+    borderRadius: 15,
+    gap: 10,
     marginTop: 10,
   },
   plusBtnText: {
     color: 'rgba(255,255,255,0.4)',
-    fontSize: 17,
+    fontSize: 14,
     fontWeight: '700',
   },
   toggleCard: {
@@ -500,43 +538,43 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     alignItems: 'center',
     backgroundColor: 'rgba(15,15,15,0.6)',
-    borderRadius: 26,
-    padding: 24,
+    borderRadius: 20,
+    padding: 14,
     borderWidth: 1.5,
     borderColor: 'rgba(255,255,255,0.08)',
-    marginBottom: 18,
+    marginBottom: 12,
   },
   toggleMeta: {
     flex: 1,
   },
   toggleTitle: {
     color: 'white',
-    fontSize: 19,
+    fontSize: 17,
     fontWeight: '900',
     textAlign: 'right',
   },
   toggleDesc: {
     color: 'rgba(255,255,255,0.3)',
-    fontSize: 13,
+    fontSize: 12,
     marginTop: 4,
     textAlign: 'right',
   },
   customToggleOuter: {
-    width: 58,
-    height: 32,
+    width: 50,
+    height: 28,
     borderRadius: 100,
     padding: 4,
     overflow: 'hidden',
   },
   toggleOn: {
-    backgroundColor: '#7c3aed',
+    backgroundColor: COOKIES_PINK,
   },
   toggleOff: {
     backgroundColor: 'rgba(255,255,255,0.1)',
   },
   customToggleInner: {
-    width: 24,
-    height: 24,
+    width: 20,
+    height: 20,
     borderRadius: 50,
     backgroundColor: 'white',
     shadowColor: '#000',
@@ -544,19 +582,54 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.2,
     elevation: 2,
   },
+  assistantModeDesc: {
+    color: 'rgba(255,255,255,0.38)',
+    fontSize: 12,
+    lineHeight: 21,
+    textAlign: 'right',
+    marginBottom: 16,
+  },
+  assistantModeOptions: {
+    flexDirection: 'row-reverse',
+    gap: 10,
+  },
+  assistantModeOption: {
+    flex: 1,
+    padding: 16,
+    borderRadius: 15,
+    backgroundColor: 'rgba(255,255,255,0.045)',
+    borderWidth: 1.5,
+    borderColor: 'rgba(255,255,255,0.08)',
+  },
+  activeAssistantModeOption: {
+    backgroundColor: 'rgba(242,166,184,0.14)',
+    borderColor: 'rgba(242,166,184,0.55)',
+  },
+  assistantModeTitle: {
+    color: 'white',
+    fontSize: 16,
+    fontWeight: '900',
+    textAlign: 'right',
+  },
+  assistantModeHint: {
+    color: 'rgba(255,255,255,0.35)',
+    fontSize: 12,
+    marginTop: 5,
+    textAlign: 'right',
+  },
   discordCard: {
     flexDirection: 'row-reverse',
     alignItems: 'center',
-    gap: 16,
-    backgroundColor: 'rgba(99,102,241,0.05)',
-    borderRadius: 22,
-    padding: 20,
+    gap: 12,
+    backgroundColor: 'rgba(242,166,184,0.05)',
+    borderRadius: 18,
+    padding: 14,
     borderWidth: 1,
-    borderColor: 'rgba(99,102,241,0.15)',
+    borderColor: 'rgba(242,166,184,0.16)',
   },
   discordIconWrapper: {
-    padding: 10,
-    backgroundColor: 'rgba(99,102,241,0.1)',
+    padding: 8,
+    backgroundColor: 'rgba(242,166,184,0.12)',
     borderRadius: 100,
   },
   discordMeta: {
@@ -564,7 +637,7 @@ const styles = StyleSheet.create({
   },
   discordLabel: {
     color: 'white',
-    fontSize: 15,
+    fontSize: 14,
     fontWeight: '800',
     textAlign: 'right',
   },
@@ -579,37 +652,38 @@ const styles = StyleSheet.create({
     bottom: 0,
     left: 0,
     right: 0,
-    padding: 24,
-    paddingBottom: Platform.OS === 'ios' ? 40 : 24,
+    paddingHorizontal: 18,
+    paddingTop: 12,
+    paddingBottom: Platform.OS === 'ios' ? 30 : 20,
     flexDirection: 'row',
-    gap: 16,
+    gap: 12,
     backgroundColor: '#020202',
     borderTopWidth: 1,
     borderTopColor: 'rgba(255,255,255,0.06)',
   },
   saveActionButton: {
     flex: 2,
-    backgroundColor: '#7c3aed',
-    padding: 20,
-    borderRadius: 22,
+    backgroundColor: COOKIES_PINK,
+    padding: 14,
+    borderRadius: 18,
     alignItems: 'center',
     justifyContent: 'center',
-    shadowColor: '#a855f7',
+    shadowColor: COOKIES_PINK_DARK,
     shadowOffset: { width: 0, height: 4 },
     shadowOpacity: 0.3,
     shadowRadius: 10,
   },
   actionText: {
     color: 'white',
-    fontSize: 20,
+    fontSize: 17,
     fontWeight: '900',
     letterSpacing: 4,
   },
   resetActionButton: {
     flex: 1,
     backgroundColor: 'rgba(244,63,94,0.08)',
-    padding: 20,
-    borderRadius: 22,
+    padding: 14,
+    borderRadius: 18,
     alignItems: 'center',
     justifyContent: 'center',
     borderWidth: 1.5,
@@ -617,7 +691,7 @@ const styles = StyleSheet.create({
   },
   resetActionText: {
     color: '#f43f5e',
-    fontSize: 18,
+    fontSize: 16,
     fontWeight: '900',
   },
 });

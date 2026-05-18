@@ -40,7 +40,7 @@ export const AssistantMode: React.FC<AssistantModeProps> = ({
   const copyAnim = useRef(new Animated.Value(0)).current;
   
   const currentTag = settings.tags.find(t => t.id === currentBubble?.tagId);
-  const bubbleColor = currentTag?.color || '#a855f7';
+  const bubbleColor = currentTag?.color || '#F2A6B8';
 
   useEffect(() => {
     bubbleAnim.setValue(0.92);
@@ -100,7 +100,7 @@ export const AssistantMode: React.FC<AssistantModeProps> = ({
           </TouchableOpacity>
           
           <View style={styles.statusDisplay}>
-            <Text style={styles.brandingCaption}>CookieTyper</Text>
+            <Text style={styles.brandingCaption}>CookiesTyper</Text>
           </View>
         </View>
 
@@ -229,7 +229,7 @@ export const AssistantMode: React.FC<AssistantModeProps> = ({
 
         {/* Global Assistant State Branding */}
         <View style={styles.globalPresenceBranding}>
-          <Copy color="#a855f7" size={14} style={{ opacity: 0.6 }} />
+          <Copy color="#F2A6B8" size={14} style={{ opacity: 0.6 }} />
           <Text style={styles.brandingTaglineText}>ASSISTANT ACTIVE</Text>
         </View>
       </View>
@@ -272,7 +272,7 @@ const styles = StyleSheet.create({
     borderColor: 'rgba(255,255,255,0.1)',
   },
   pagerText: {
-    color: '#a855f7',
+    color: '#F2A6B8',
     fontSize: 14,
     fontWeight: '900',
     fontFamily: Platform.OS === 'ios' ? 'Avenir-Heavy' : 'monospace',
@@ -302,7 +302,7 @@ const styles = StyleSheet.create({
   },
   seekBarProgress: {
     height: '100%',
-    backgroundColor: '#9333ea',
+    backgroundColor: '#C96F86',
   },
   seekLabels: {
     flexDirection: 'row-reverse',
@@ -337,7 +337,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
     borderWidth: 1.5,
-    shadowColor: '#a855f7',
+    shadowColor: '#F2A6B8',
     shadowOffset: { width: 0, height: 12 },
     shadowOpacity: 0.15,
     shadowRadius: 30,
