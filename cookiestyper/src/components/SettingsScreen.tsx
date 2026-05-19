@@ -162,7 +162,7 @@ export const SettingsScreen: React.FC<SettingsScreenProps> = ({
             ratio={scaleRatio}
             onLayoutWidth={setScaleRangeWidth}
             onMove={updateScaleFromPosition}
-            ticks={[80, 90, 100, 110, 120]}
+            ticks={[60, 70, 80, 90, 100, 110, 120]}
             activeValue={settings.assistantScale}
             suffix="%"
             onTick={num => setSettings(prev => ({ ...prev, assistantScale: num }))}
@@ -212,7 +212,7 @@ export const SettingsScreen: React.FC<SettingsScreenProps> = ({
         {Platform.OS === 'android' && (
           <View style={styles.card}>
             <Text style={styles.cardTitle}>وضع المساعد</Text>
-            <Text style={styles.assistantModeDesc}>اختر طريقة فتح الجلسة القادمة عند الضغط على START. لا يؤثر هذا على جلسة مفتوحة حالياً.</Text>
+            <Text style={styles.assistantModeDesc}>اختر طريقة فتح الجلسة القادمة عند الضغط على ابدأ. لا يؤثر هذا على جلسة مفتوحة حالياً.</Text>
             <View style={styles.assistantModeOptions}>
               <TouchableOpacity activeOpacity={0.85} onPress={() => updateAssistantMode('floating')} style={[styles.assistantModeOption, settings.assistantMode === 'floating' && styles.activeAssistantModeOption]}>
                 <Text style={styles.assistantModeTitle}>عائم</Text>
@@ -239,10 +239,10 @@ export const SettingsScreen: React.FC<SettingsScreenProps> = ({
 
       <View style={styles.actionBar}>
         <TouchableOpacity onPress={() => onSave(settings)} activeOpacity={0.8} style={styles.saveActionButton}>
-          <Text style={styles.actionText}>SAVE</Text>
+          <Text style={styles.actionText}>حفظ</Text>
         </TouchableOpacity>
         <TouchableOpacity onPress={() => setDialog({ type: 'reset' })} activeOpacity={0.8} style={styles.resetActionButton}>
-          <Text style={styles.resetActionText}>RESET</Text>
+          <Text style={styles.resetActionText}>إعادة ضبط</Text>
         </TouchableOpacity>
       </View>
 
