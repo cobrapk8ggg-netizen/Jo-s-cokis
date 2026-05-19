@@ -18,7 +18,10 @@
     "react-native-paper": "4.9.2",
     "lucide-react-native": "*",
     "expo-linear-gradient": "~15.0.8",
-    "@react-native-async-storage/async-storage": "2.2.0"
+    "@react-native-async-storage/async-storage": "2.2.0",
+    "expo-media-library": "~17.0.8",
+    "react-native-view-shot": "4.0.3",
+    "expo-image-picker": "~16.0.8"
   },
   "private": true
 }
