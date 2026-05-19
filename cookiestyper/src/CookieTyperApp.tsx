@@ -1,29 +1,30 @@
 import React, { useEffect, useState } from 'react';
-import { ActivityIndicator, AppState, Linking, Platform, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { ActivityIndicator, AppState, I18nManager, Linking, Platform, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { MainScreen } from './components/MainScreen';
 import { SettingsScreen } from './components/SettingsScreen';
 import { AssistantMode } from './components/AssistantMode';
 import { SpaceBackground } from './components/SpaceBackground';
-import { HomeScreen } from './components/HomeScreen';
 import { AppDrawer, ToolScreen } from './components/AppDrawer';
 import { ThemedModal } from './components/ThemedModal';
+import { OperationsScreen } from './components/OperationsScreen';
 import { useCookieTyper } from './hooks/useCookieTyper';
 import { FloatingAssistantNative, floatingAssistantEvents } from './native/FloatingAssistantNative';
 import { buildFloatingSession, MAIN_SESSION_STORAGE_KEY, persistFloatingSession } from './floatingSession';
 import { DEFAULT_SETTINGS } from './defaults';
 import { OperationLogItem } from './types';
 
-type AppScreen = ToolScreen | 'assistant';
+type AppScreen = ToolScreen | 'settings' | 'assistant';
 type NoticeState = { visible: boolean; title: string; message: string; confirmText?: string; onConfirm?: () => void };
 
 const OPERATIONS_STORAGE_KEY = 'cookies_recent_operations';
+const MENU_HINT_KEY = 'cookies_menu_hint_seen';
 const COOKIES_DISCORD_URL = 'https://discord.gg/cookiesteam';
 
 export default function App() {
-  const [screen, setScreen] = useState<AppScreen>('home');
-  const [previousScreen, setPreviousScreen] = useState<AppScreen>('home');
+  const [screen, setScreen] = useState<AppScreen>('typer');
+  const [previousScreen, setPreviousScreen] = useState<AppScreen>('typer');
   const [drawerVisible, setDrawerVisible] = useState(false);
   const [notice, setNotice] = useState<NoticeState>({ visible: false, title: '', message: '' });
   const [operations, setOperations] = useState<OperationLogItem[]>([]);
@@ -55,10 +56,29 @@ export default function App() {
       timeLabel: 'الآن',
     };
     setOperations(prev => {
-      const next = [nextItem, ...prev].slice(0, 5);
+      const next = [nextItem, ...prev].slice(0, 100);
       AsyncStorage.setItem(OPERATIONS_STORAGE_KEY, JSON.stringify(next));
       return next;
     });
+  };
+
+
+  const [showMenuHint, setShowMenuHint] = useState(false);
+  useEffect(() => { I18nManager.allowRTL(false); }, []);
+  useEffect(() => {
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    AsyncStorage.getItem(MENU_HINT_KEY).then(v => {
+      if (v) return;
+      timer = setTimeout(() => setShowMenuHint(true), 60000);
+    });
+    return () => {
+      if (timer) clearTimeout(timer);
+    };
+  }, []);
+  const openMenu = () => {
+    setDrawerVisible(v => !v);
+    if (showMenuHint) setShowMenuHint(false);
+    AsyncStorage.setItem(MENU_HINT_KEY, '1');
   };
 
   const showNotice = (title: string, message: string, confirmText = 'حسنًا', onConfirm?: () => void) => {
@@ -167,7 +187,7 @@ export default function App() {
     setScreen('settings');
   };
 
-  const navBackFromSettings = () => setScreen(previousScreen === 'settings' ? 'home' : previousScreen);
+  const navBackFromSettings = () => setScreen(previousScreen === 'settings' ? 'typer' : previousScreen);
 
   const persistSettings = (config: any) => {
     setSettings(config);
@@ -195,30 +215,22 @@ export default function App() {
       setScreen('imageMerge');
       return;
     }
-    if (target === 'settings') {
-      navToSettings();
-      return;
-    }
     setScreen(target);
   };
 
-  const activeDrawerScreen: ToolScreen = screen === 'assistant' ? 'typer' : (screen as ToolScreen);
+  const activeDrawerScreen: ToolScreen = screen === 'assistant' || screen==='settings' ? 'typer' : (screen as ToolScreen);
 
   return (
     <SpaceBackground>
       <StatusBar style="light" />
       <View style={styles.viewPort}>
-        {screen === 'home' && <HomeScreen operations={operations} onOpenMenu={() => setDrawerVisible(true)} onOpenTyper={() => setScreen('typer')} />}
-
         {screen === 'typer' && (
           <MainScreen
             inputText={session.inputText}
             onStart={handleStartRequested}
             onOpenSettings={navToSettings}
-            onOpenMenu={() => setDrawerVisible(true)}
-            onBackHome={() => setScreen('home')}
+            onOpenMenu={openMenu}
             bubbleCount={session.bubbles.length}
-            settings={settings}
           />
         )}
 
@@ -228,15 +240,18 @@ export default function App() {
 
         {screen === 'assistant' && <AssistantMode session={session} settings={settings} onNext={nextBubble} onPrev={prevBubble} onGoTo={goToBubble} onClose={() => setScreen('typer')} />}
 
+        {screen === 'operations' && <OperationsScreen operations={operations} onOpenMenu={openMenu} />}
+
         {screen === 'imageMerge' && (
           <View style={styles.placeholderScreen}>
             <Text style={styles.placeholderTitle}>دمج الصور</Text>
             <Text style={styles.placeholderText}>هذه أداة مستقبلية مستقلة لا تؤثر على Typer. سيتم لاحقًا دعم اختيار الصور، ترتيبها، دمجها، وحفظ الناتج.</Text>
-            <TouchableOpacity onPress={() => setDrawerVisible(true)} style={styles.placeholderButton}><Text style={styles.placeholderButtonText}>فتح القائمة</Text></TouchableOpacity>
+            <TouchableOpacity onPress={openMenu} style={styles.placeholderButton}><Text style={styles.placeholderButtonText}>فتح القائمة</Text></TouchableOpacity>
           </View>
         )}
       </View>
       <AppDrawer visible={drawerVisible} active={activeDrawerScreen} onClose={() => setDrawerVisible(false)} onSelect={handleDrawerSelect} />
+      {showMenuHint && !drawerVisible && <View style={styles.menuHint}><Text style={styles.menuHintText}>اضغط هنا للوصول إلى دمج الصور وآخر العمليات</Text></View>}
       <ThemedModal
         visible={notice.visible}
         title={notice.title}
@@ -257,4 +272,6 @@ const styles = StyleSheet.create({
   placeholderText: { color: 'rgba(255,255,255,0.56)', fontSize: 14, lineHeight: 24, textAlign: 'right', marginTop: 12 },
   placeholderButton: { marginTop: 18, backgroundColor: '#F2A6B8', borderRadius: 18, padding: 14, alignItems: 'center' },
   placeholderButtonText: { color: 'white', fontWeight: '900' },
+  menuHint: { position:'absolute', top:80, right:18, backgroundColor:'rgba(242,166,184,0.95)', paddingHorizontal:12, paddingVertical:8, borderRadius:12 },
+  menuHintText:{ color:'#1b0b12', fontWeight:'800' },
 });

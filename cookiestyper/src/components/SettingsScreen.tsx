@@ -162,7 +162,7 @@ export const SettingsScreen: React.FC<SettingsScreenProps> = ({
             ratio={scaleRatio}
             onLayoutWidth={setScaleRangeWidth}
             onMove={updateScaleFromPosition}
-            ticks={[80, 90, 100, 110, 120]}
+            ticks={[60, 70, 80, 90, 100, 110, 120]}
             activeValue={settings.assistantScale}
             suffix="%"
             onTick={num => setSettings(prev => ({ ...prev, assistantScale: num }))}
@@ -230,7 +230,7 @@ export const SettingsScreen: React.FC<SettingsScreenProps> = ({
           <View style={styles.discordIconWrapper}><DiscordIcon color={COOKIES_PINK_DARK} size={21} /></View>
           <View style={styles.discordMeta}>
             <Text style={styles.discordLabel}>إبلاغ / Discord</Text>
-            <Text style={styles.discordSubLabel}>Open Cookies Discord Server</Text>
+            <Text style={styles.discordSubLabel}>فتح سيرفر Cookies على Discord</Text>
           </View>
         </TouchableOpacity>
 
@@ -239,10 +239,10 @@ export const SettingsScreen: React.FC<SettingsScreenProps> = ({
 
       <View style={styles.actionBar}>
         <TouchableOpacity onPress={() => onSave(settings)} activeOpacity={0.8} style={styles.saveActionButton}>
-          <Text style={styles.actionText}>SAVE</Text>
+          <Text style={styles.actionText}>حفظ</Text>
         </TouchableOpacity>
         <TouchableOpacity onPress={() => setDialog({ type: 'reset' })} activeOpacity={0.8} style={styles.resetActionButton}>
-          <Text style={styles.resetActionText}>RESET</Text>
+          <Text style={styles.resetActionText}>إعادة ضبط</Text>
         </TouchableOpacity>
       </View>
 

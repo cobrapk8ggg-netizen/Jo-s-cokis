@@ -1,10 +1,10 @@
 import React from 'react';
 import { Animated, Easing, Modal, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
-import { Disc as DiscordIcon, Home, ImagePlus, Info, PenLine, Settings, X } from 'lucide-react-native';
+import { Disc as DiscordIcon, History, ImagePlus, PenLine, X } from 'lucide-react-native';
 
 const COOKIES_PINK = '#F2A6B8';
 
-export type ToolScreen = 'home' | 'typer' | 'settings' | 'imageMerge' | 'about';
+export type ToolScreen = 'typer' | 'imageMerge' | 'operations' | 'about';
 
 type AppDrawerProps = {
   visible: boolean;
@@ -14,10 +14,9 @@ type AppDrawerProps = {
 };
 
 const items = [
-  { id: 'home' as ToolScreen, label: 'الرئيسية', Icon: Home },
-  { id: 'typer' as ToolScreen, label: 'Typer', Icon: PenLine },
+  { id: 'typer' as ToolScreen, label: 'تايبر', Icon: PenLine },
   { id: 'imageMerge' as ToolScreen, label: 'دمج الصور', Icon: ImagePlus },
-  { id: 'settings' as ToolScreen, label: 'الإعدادات', Icon: Settings },
+  { id: 'operations' as ToolScreen, label: 'آخر العمليات', Icon: History },
   { id: 'about' as ToolScreen, label: 'Discord / الدعم', Icon: DiscordIcon },
 ];
 
@@ -36,7 +35,7 @@ export const AppDrawer: React.FC<AppDrawerProps> = ({ visible, active, onClose, 
           <View style={styles.drawerHeader}>
             <TouchableOpacity onPress={onClose} style={styles.closeButton}><X color="white" size={20} /></TouchableOpacity>
             <View>
-              <Text style={styles.drawerTitle}>Cookies Tools</Text>
+              <Text style={styles.drawerTitle}>CookieTyper</Text>
               <Text style={styles.drawerSubtitle}>قائمة الأدوات</Text>
             </View>
           </View>
@@ -50,10 +49,6 @@ export const AppDrawer: React.FC<AppDrawerProps> = ({ visible, active, onClose, 
                 </TouchableOpacity>
               );
             })}
-          </View>
-          <View style={styles.futureBox}>
-            <Info color={COOKIES_PINK} size={16} />
-            <Text style={styles.futureText}>بنية التطبيق جاهزة لإضافة أدوات مستقلة مثل دمج الصور لاحقًا بدون التأثير على Typer.</Text>
           </View>
         </Animated.View>
       </Animated.View>
