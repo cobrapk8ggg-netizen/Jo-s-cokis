@@ -64,6 +64,7 @@ export function ImageMergeScreen({
   const [resultReady, setResultReady] = useState(false);
   const [mergedImageUri, setMergedImageUri] = useState<string | null>(null);
   const [isMerging, setIsMerging] = useState(false);
+  const [showCaptureView, setShowCaptureView] = useState(false);
 
   const mergeViewRef = useRef<View>(null);
 
@@ -72,6 +73,10 @@ export function ImageMergeScreen({
     if (images.length === 0) return null;
 
     setIsMerging(true);
+    setShowCaptureView(true);
+
+    // Small delay to ensure the capture view is laid out before capture
+    await new Promise(resolve => setTimeout(resolve, 100));
 
     try {
       // Calculate dimensions
@@ -99,17 +104,6 @@ export function ImageMergeScreen({
         if (i < items.length - 1) totalHeight += GAP;
       }
 
-      // Create a temporary View that will be captured
-      // We place it off-screen but still visible to the capture system.
-      // This view is not part of the main UI, it's only for capturing.
-      // We'll render it conditionally, but captureRef requires it to be mounted.
-      // So we always keep it but with opacity 0 and position absolute.
-      // We need to ensure it's rendered before capture.
-      // Since we are inside a ScrollView, we'll put it outside the ScrollView
-      // but inside the same root view.
-
-      // We'll capture using the ref after the view is updated.
-      // To be safe we set a small delay.
       if (!mergeViewRef.current) return null;
 
       const uri = await captureRef(mergeViewRef.current, {
@@ -122,6 +116,7 @@ export function ImageMergeScreen({
       return null;
     } finally {
       setIsMerging(false);
+      setShowCaptureView(false);
     }
   };
 
@@ -407,8 +402,8 @@ export function ImageMergeScreen({
         </View>
       </ScrollView>
 
-      {/* Hidden capture view */}
-      {renderMergeCaptureView()}
+      {/* Hidden capture view – يظهر فقط أثناء الدمج */}
+      {showCaptureView && renderMergeCaptureView()}
 
       {/* Real preview modal */}
       <Modal
@@ -438,7 +433,7 @@ export function ImageMergeScreen({
                 style={{
                   width: `${previewScale}%`,
                   alignSelf: 'center',
-                  aspectRatio: 1, // will be overridden by actual image dimensions
+                  aspectRatio: 1,
                 }}
                 resizeMode="contain"
               />
