@@ -3,6 +3,8 @@ export type TagType = {
   symbol: string;
   name: string;
   color: string;
+  fontUri?: string;
+  fontName?: string;
 };
 
 export type BubbleType = {
@@ -18,10 +20,19 @@ export type Settings = {
   tags: TagType[];
   smartCleaner: boolean;
   assistantMode?: AssistantModePreference | null;
+  assistantScale: number;
 };
 
 export type SessionData = {
   bubbles: BubbleType[];
   currentIndex: number;
   inputText: string;
+};
+
+export type OperationLogItem = {
+  id: string;
+  tool: string;
+  description: string;
+  timeLabel: string;
+  createdAt?: number;
 };

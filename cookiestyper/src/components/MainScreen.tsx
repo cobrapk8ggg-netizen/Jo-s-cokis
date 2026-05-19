@@ -12,7 +12,7 @@ import {
   Easing,
   StatusBar as RNStatusBar
 } from 'react-native';
-import { Settings as SettingsIcon, Play } from 'lucide-react-native';
+import { Menu, Settings as SettingsIcon, Play } from 'lucide-react-native';
 import { Settings } from '../types';
 
 const COOKIES_PINK = '#F2A6B8';
@@ -22,6 +22,7 @@ interface MainScreenProps {
   inputText: string;
   onStart: (text: string) => void;
   onOpenSettings: () => void;
+  onOpenMenu?: () => void;
   bubbleCount: number;
   settings: Settings;
 }
@@ -30,11 +31,11 @@ export const MainScreen: React.FC<MainScreenProps> = ({
   inputText: initialText, 
   onStart, 
   onOpenSettings,
+  onOpenMenu,
   bubbleCount,
   settings
 }) => {
   const [text, setText] = useState(initialText);
-  const [inputScrollY, setInputScrollY] = useState(0);
 
   const headerAnim = useRef(new Animated.Value(0)).current;
   const inputAnim = useRef(new Animated.Value(0)).current;
@@ -72,53 +73,6 @@ export const MainScreen: React.FC<MainScreenProps> = ({
       }),
     ]).start();
   }, [headerAnim, inputAnim, actionsAnim, footerAnim]);
-
-  const hexToRgba = (hex: string, alpha: number) => {
-    const cleanHex = hex.replace('#', '');
-
-    if (cleanHex.length !== 6) {
-      return `rgba(242,166,184,${alpha})`;
-    }
-
-    const red = parseInt(cleanHex.substring(0, 2), 16);
-    const green = parseInt(cleanHex.substring(2, 4), 16);
-    const blue = parseInt(cleanHex.substring(4, 6), 16);
-
-    return `rgba(${red},${green},${blue},${alpha})`;
-  };
-
-  const findLineTag = (line: string) => {
-    const trimmedStartLine = line.trimStart();
-
-    return settings.tags.find(tag => (
-      tag.symbol &&
-      trimmedStartLine.startsWith(tag.symbol)
-    ));
-  };
-
-  const renderHighlightedText = () => {
-    const lines = text.split('\n');
-
-    return lines.map((line, index) => {
-      const matchedTag = findLineTag(line);
-
-      return (
-        <View key={`${index}-${line}`} style={styles.highlightLineWrapper}>
-          <Text
-            style={[
-              styles.highlightLine,
-              matchedTag && {
-                backgroundColor: hexToRgba(matchedTag.color, 0.22),
-                borderColor: hexToRgba(matchedTag.color, 0.45),
-              }
-            ]}
-          >
-            {line.length > 0 ? line : ' '}
-          </Text>
-        </View>
-      );
-    });
-  };
 
   const handleStartPress = () => {
     if (!text.trim()) return;
@@ -198,12 +152,17 @@ export const MainScreen: React.FC<MainScreenProps> = ({
             },
           ]}
         >
+          <TouchableOpacity onPress={onOpenMenu} style={styles.menuButton} activeOpacity={0.85}>
+            <Menu color="white" size={22} />
+          </TouchableOpacity>
+
           <View style={styles.titleGroup}>
             <View style={styles.counterBadge}>
               <Text style={styles.counterText}>{bubbleCount || 0}</Text>
             </View>
-            <Text style={styles.brandTitle}>CookieTyper</Text>
+            <Text style={styles.brandTitle}>كوكيز تايبر</Text>
           </View>
+
         </Animated.View>
 
         {/* Glossy Text Input Container */}
@@ -225,30 +184,13 @@ export const MainScreen: React.FC<MainScreenProps> = ({
           ]}
         >
           <View style={styles.inputGlassLayer}>
-            <View
-              pointerEvents="none"
-              style={[
-                styles.highlightLayer,
-                {
-                  transform: [{ translateY: -inputScrollY }],
-                },
-              ]}
-            >
-              {renderHighlightedText()}
-            </View>
-
             <TextInput
               multiline
               value={text}
               onChangeText={setText}
-              onScroll={(event) => setInputScrollY(event.nativeEvent.contentOffset.y)}
-              scrollEventThrottle={16}
               placeholder="الصق النص هنا..."
               placeholderTextColor="rgba(255,255,255,0.2)"
-              style={[
-                styles.textInput,
-                text.length > 0 && styles.transparentTextInput
-              ]}
+              style={styles.textInput}
               textAlignVertical="top"
               selectionColor={COOKIES_PINK}
             />
@@ -282,7 +224,7 @@ export const MainScreen: React.FC<MainScreenProps> = ({
               ]}
             >
               <Play color="white" size={22} fill="white" />
-              <Text style={styles.startBtnText}>START</Text>
+              <Text style={styles.startBtnText}>ابدأ</Text>
             </Animated.View>
           </TouchableOpacity>
 
@@ -320,7 +262,7 @@ export const MainScreen: React.FC<MainScreenProps> = ({
             },
           ]}
         >
-          <Text style={styles.discordInfo}>BY ZEUS</Text>
+          <Text style={styles.discordInfo}>كوكيز تايبر</Text>
         </Animated.View>
       </KeyboardAvoidingView>
     </SafeAreaView>
@@ -343,6 +285,16 @@ const styles = StyleSheet.create({
     flexDirection: 'row-reverse',
     alignItems: 'center',
     justifyContent: 'space-between',
+  },
+  menuButton: {
+    width: 42,
+    height: 42,
+    borderRadius: 16,
+    backgroundColor: 'rgba(255,255,255,0.07)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.1)',
+    justifyContent: 'center',
+    alignItems: 'center',
   },
   titleGroup: {
     flexDirection: 'row-reverse',
