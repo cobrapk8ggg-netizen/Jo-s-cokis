@@ -38,7 +38,6 @@ export const MainScreen: React.FC<MainScreenProps> = ({
   settings
 }) => {
   const [text, setText] = useState(initialText);
-  const [inputScrollY, setInputScrollY] = useState(0);
 
   const headerAnim = useRef(new Animated.Value(0)).current;
   const inputAnim = useRef(new Animated.Value(0)).current;
@@ -77,52 +76,6 @@ export const MainScreen: React.FC<MainScreenProps> = ({
     ]).start();
   }, [headerAnim, inputAnim, actionsAnim, footerAnim]);
 
-  const hexToRgba = (hex: string, alpha: number) => {
-    const cleanHex = hex.replace('#', '');
-
-    if (cleanHex.length !== 6) {
-      return `rgba(242,166,184,${alpha})`;
-    }
-
-    const red = parseInt(cleanHex.substring(0, 2), 16);
-    const green = parseInt(cleanHex.substring(2, 4), 16);
-    const blue = parseInt(cleanHex.substring(4, 6), 16);
-
-    return `rgba(${red},${green},${blue},${alpha})`;
-  };
-
-  const findLineTag = (line: string) => {
-    const trimmedStartLine = line.trimStart();
-
-    return settings.tags.find(tag => (
-      tag.symbol &&
-      trimmedStartLine.startsWith(tag.symbol)
-    ));
-  };
-
-  const renderHighlightedText = () => {
-    const lines = text.split('\n');
-
-    return lines.map((line, index) => {
-      const matchedTag = findLineTag(line);
-
-      return (
-        <View key={`${index}-${line}`} style={styles.highlightLineWrapper}>
-          <Text
-            style={[
-              styles.highlightLine,
-              matchedTag && {
-                backgroundColor: hexToRgba(matchedTag.color, 0.22),
-                borderColor: hexToRgba(matchedTag.color, 0.45),
-              }
-            ]}
-          >
-            {line.length > 0 ? line : ' '}
-          </Text>
-        </View>
-      );
-    });
-  };
 
   const handleStartPress = () => {
     if (!text.trim()) return;
@@ -237,23 +190,10 @@ export const MainScreen: React.FC<MainScreenProps> = ({
           ]}
         >
           <View style={styles.inputGlassLayer}>
-            <View
-              pointerEvents="none"
-              style={[
-                styles.highlightLayer,
-                {
-                  transform: [{ translateY: -inputScrollY }],
-                },
-              ]}
-            >
-              {renderHighlightedText()}
-            </View>
-
             <TextInput
               multiline
               value={text}
               onChangeText={setText}
-              onScroll={(event) => setInputScrollY(event.nativeEvent.contentOffset.y)}
               scrollEventThrottle={16}
               placeholder="الصق النص هنا..."
               placeholderTextColor="rgba(255,255,255,0.2)"
@@ -294,7 +234,7 @@ export const MainScreen: React.FC<MainScreenProps> = ({
               ]}
             >
               <Play color="white" size={22} fill="white" />
-              <Text style={styles.startBtnText}>START</Text>
+              <Text style={styles.startBtnText}>ابدأ</Text>
             </Animated.View>
           </TouchableOpacity>
 

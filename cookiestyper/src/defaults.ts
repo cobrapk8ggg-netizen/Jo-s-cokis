@@ -1,7 +1,7 @@
 import { Platform } from 'react-native';
 import { Settings, TagType } from './types';
 
-export const ASSISTANT_SCALE_MIN = 80;
+export const ASSISTANT_SCALE_MIN = 60;
 export const ASSISTANT_SCALE_MAX = 120;
 
 export const DEFAULT_TAGS: TagType[] = [

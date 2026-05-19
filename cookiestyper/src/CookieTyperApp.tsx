@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { ActivityIndicator, AppState, Linking, Platform, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
 import AsyncStorage from '@react-native-async-storage/async-storage';
@@ -6,7 +6,6 @@ import { MainScreen } from './components/MainScreen';
 import { SettingsScreen } from './components/SettingsScreen';
 import { AssistantMode } from './components/AssistantMode';
 import { SpaceBackground } from './components/SpaceBackground';
-import { HomeScreen } from './components/HomeScreen';
 import { AppDrawer, ToolScreen } from './components/AppDrawer';
 import { ThemedModal } from './components/ThemedModal';
 import { useCookieTyper } from './hooks/useCookieTyper';
@@ -14,6 +13,8 @@ import { FloatingAssistantNative, floatingAssistantEvents } from './native/Float
 import { buildFloatingSession, MAIN_SESSION_STORAGE_KEY, persistFloatingSession } from './floatingSession';
 import { DEFAULT_SETTINGS } from './defaults';
 import { OperationLogItem } from './types';
+import { OperationsScreen } from './components/OperationsScreen';
+import { ImageMergeScreen } from './components/ImageMergeScreen';
 
 type AppScreen = ToolScreen | 'assistant';
 type NoticeState = { visible: boolean; title: string; message: string; confirmText?: string; onConfirm?: () => void };
@@ -22,11 +23,13 @@ const OPERATIONS_STORAGE_KEY = 'cookies_recent_operations';
 const COOKIES_DISCORD_URL = 'https://discord.gg/cookiesteam';
 
 export default function App() {
-  const [screen, setScreen] = useState<AppScreen>('home');
-  const [previousScreen, setPreviousScreen] = useState<AppScreen>('home');
+  const [screen, setScreen] = useState<AppScreen>('typer');
+  const [previousScreen, setPreviousScreen] = useState<AppScreen>('typer');
   const [drawerVisible, setDrawerVisible] = useState(false);
   const [notice, setNotice] = useState<NoticeState>({ visible: false, title: '', message: '' });
   const [operations, setOperations] = useState<OperationLogItem[]>([]);
+  const [showMenuHint, setShowMenuHint] = useState(false);
+  const hintTimer = useRef<any>(null);
 
   const {
     settings,
@@ -167,7 +170,7 @@ export default function App() {
     setScreen('settings');
   };
 
-  const navBackFromSettings = () => setScreen(previousScreen === 'settings' ? 'home' : previousScreen);
+  const navBackFromSettings = () => setScreen(previousScreen === 'settings' ? 'typer' : previousScreen);
 
   const persistSettings = (config: any) => {
     setSettings(config);
@@ -195,28 +198,30 @@ export default function App() {
       setScreen('imageMerge');
       return;
     }
-    if (target === 'settings') {
-      navToSettings();
-      return;
-    }
-    setScreen(target);
+setScreen(target);
   };
 
   const activeDrawerScreen: ToolScreen = screen === 'assistant' ? 'typer' : (screen as ToolScreen);
+
+  useEffect(() => {
+    AsyncStorage.getItem('menu_hint_seen').then((seen) => {
+      if (seen) return;
+      hintTimer.current = setTimeout(() => setShowMenuHint(true), 60000);
+    });
+    return () => clearTimeout(hintTimer.current);
+  }, []);
 
   return (
     <SpaceBackground>
       <StatusBar style="light" />
       <View style={styles.viewPort}>
-        {screen === 'home' && <HomeScreen operations={operations} onOpenMenu={() => setDrawerVisible(true)} onOpenTyper={() => setScreen('typer')} />}
-
         {screen === 'typer' && (
           <MainScreen
             inputText={session.inputText}
             onStart={handleStartRequested}
             onOpenSettings={navToSettings}
             onOpenMenu={() => setDrawerVisible(true)}
-            onBackHome={() => setScreen('home')}
+onBackHome={() => setScreen('operations')}
             bubbleCount={session.bubbles.length}
             settings={settings}
           />
@@ -228,15 +233,12 @@ export default function App() {
 
         {screen === 'assistant' && <AssistantMode session={session} settings={settings} onNext={nextBubble} onPrev={prevBubble} onGoTo={goToBubble} onClose={() => setScreen('typer')} />}
 
-        {screen === 'imageMerge' && (
-          <View style={styles.placeholderScreen}>
-            <Text style={styles.placeholderTitle}>دمج الصور</Text>
-            <Text style={styles.placeholderText}>هذه أداة مستقبلية مستقلة لا تؤثر على Typer. سيتم لاحقًا دعم اختيار الصور، ترتيبها، دمجها، وحفظ الناتج.</Text>
-            <TouchableOpacity onPress={() => setDrawerVisible(true)} style={styles.placeholderButton}><Text style={styles.placeholderButtonText}>فتح القائمة</Text></TouchableOpacity>
-          </View>
-        )}
+        {screen === 'imageMerge' && <ImageMergeScreen onOpenMenu={() => setDrawerVisible(true)} onLog={(description) => addOperation({ tool: 'دمج الصور', description })} />}
+
+        {screen === 'operations' && <OperationsScreen operations={operations} onOpenMenu={() => setDrawerVisible(true)} />}
       </View>
-      <AppDrawer visible={drawerVisible} active={activeDrawerScreen} onClose={() => setDrawerVisible(false)} onSelect={handleDrawerSelect} />
+      <AppDrawer visible={drawerVisible} active={activeDrawerScreen} onClose={() => { setDrawerVisible(false); setShowMenuHint(false); AsyncStorage.setItem('menu_hint_seen', '1'); }} onSelect={handleDrawerSelect} />
+      {showMenuHint && !drawerVisible && <View style={styles.menuHint}><Text style={styles.menuHintText}>اضغط هنا للوصول إلى دمج الصور وآخر العمليات</Text></View>}
       <ThemedModal
         visible={notice.visible}
         title={notice.title}
@@ -252,9 +254,6 @@ export default function App() {
 const styles = StyleSheet.create({
   loadingHost: { flex: 1, backgroundColor: '#020202', justifyContent: 'center', alignItems: 'center' },
   viewPort: { flex: 1 },
-  placeholderScreen: { flex: 1, justifyContent: 'center', padding: 24 },
-  placeholderTitle: { color: 'white', fontSize: 30, fontWeight: '900', textAlign: 'right' },
-  placeholderText: { color: 'rgba(255,255,255,0.56)', fontSize: 14, lineHeight: 24, textAlign: 'right', marginTop: 12 },
-  placeholderButton: { marginTop: 18, backgroundColor: '#F2A6B8', borderRadius: 18, padding: 14, alignItems: 'center' },
-  placeholderButtonText: { color: 'white', fontWeight: '900' },
+  menuHint: { position: 'absolute', top: 84, right: 16, backgroundColor: 'rgba(7,7,12,0.96)', borderColor: 'rgba(242,166,184,0.4)', borderWidth: 1, paddingHorizontal: 12, paddingVertical: 10, borderRadius: 12 },
+  menuHintText: { color: 'white', fontSize: 12 },
 });
