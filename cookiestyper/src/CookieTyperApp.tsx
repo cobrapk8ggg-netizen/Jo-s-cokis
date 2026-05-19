@@ -9,6 +9,7 @@ import { SpaceBackground } from './components/SpaceBackground';
 import { AppDrawer, ToolScreen } from './components/AppDrawer';
 import { ThemedModal } from './components/ThemedModal';
 import { OperationsScreen } from './components/OperationsScreen';
+import { ImageMergeScreen } from './components/ImageMergeScreen';
 import { useCookieTyper } from './hooks/useCookieTyper';
 import { FloatingAssistantNative, floatingAssistantEvents } from './native/FloatingAssistantNative';
 import { buildFloatingSession, MAIN_SESSION_STORAGE_KEY, persistFloatingSession } from './floatingSession';
@@ -243,11 +244,10 @@ export default function App() {
         {screen === 'operations' && <OperationsScreen operations={operations} onOpenMenu={openMenu} />}
 
         {screen === 'imageMerge' && (
-          <View style={styles.placeholderScreen}>
-            <Text style={styles.placeholderTitle}>دمج الصور</Text>
-            <Text style={styles.placeholderText}>هذه أداة مستقبلية مستقلة لا تؤثر على Typer. سيتم لاحقًا دعم اختيار الصور، ترتيبها، دمجها، وحفظ الناتج.</Text>
-            <TouchableOpacity onPress={openMenu} style={styles.placeholderButton}><Text style={styles.placeholderButtonText}>فتح القائمة</Text></TouchableOpacity>
-          </View>
+          <ImageMergeScreen
+            onOpenMenu={openMenu}
+            onAddOperation={(payload) => addOperation({ tool: payload.tool, description: payload.description })}
+          />
         )}
       </View>
       <AppDrawer visible={drawerVisible} active={activeDrawerScreen} onClose={() => setDrawerVisible(false)} onSelect={handleDrawerSelect} />
