@@ -13,13 +13,11 @@ import {
   TouchableOpacity,
   View,
   ActivityIndicator,
-  PixelRatio,
-  Dimensions,
   Animated,
 } from 'react-native';
 import * as ImagePicker from 'expo-image-picker';
 import * as MediaLibrary from 'expo-media-library';
-import { captureRef } from 'react-native-view-shot';
+import * as FileSystem from 'expo-file-system';
 import {
   ArrowDown,
   ArrowUp,
@@ -36,6 +34,9 @@ const BG_CARD = 'rgba(15,15,15,0.6)';
 const TEXT_SECONDARY = 'rgba(255,255,255,0.7)';
 const TEXT_HINT = 'rgba(255,255,255,0.38)';
 const GAP = 0; // تم جعله 0 لدمج احترافي بدون فراغات بيضاء، يمكنك تغييره إن أردت
+
+// قم بتغيير هذا الرابط إلى رابط خادمك على Railway
+const SERVER_URL = 'https://your-server.railway.app';
 
 type MergeImageItem = {
   id: string;
@@ -66,13 +67,10 @@ export function ImageMergeScreen({
   const [resultReady, setResultReady] = useState(false);
   const [mergedImageUri, setMergedImageUri] = useState<string | null>(null);
   const [isMerging, setIsMerging] = useState(false);
-  const [showCaptureView, setShowCaptureView] = useState(false);
 
   // أنميشن للواجهة الأسطورية
   const fadeAnim = useRef(new Animated.Value(0)).current;
   const slideAnim = useRef(new Animated.Value(30)).current;
-  const loadedImagesCountRef = useRef(0);
-  const mergeViewRef = useRef<View>(null);
 
   useEffect(() => {
     Animated.parallel([
@@ -90,44 +88,71 @@ export function ImageMergeScreen({
     ]).start();
   }, [fadeAnim, slideAnim]);
 
-  // دالة الدمج الاحترافية مع الحفاظ على أعلى جودة للصورة دون المساس بها
-  const performMerge = async (): Promise<string | null> => {
+  // دالة رفع الصور للخادم والدمج
+  const uploadAndMerge = async (): Promise<string | null> => {
     if (images.length === 0) return null;
 
     setIsMerging(true);
-    setShowCaptureView(true);
-    loadedImagesCountRef.current = 0;
-
-    // ننتظر حتى يتم تحميل كل الصور داخل حاوية الدمج الوهمية
-    let attempts = 0;
-    while (loadedImagesCountRef.current < images.length && attempts < 100) {
-      await new Promise((resolve) => setTimeout(resolve, 100));
-      attempts++;
-    }
-
-    // إعطاء محرك الرندر وقتاً إضافياً لترتيب البيكسلات
-    await new Promise((resolve) => setTimeout(resolve, 500));
-
     try {
-      if (!mergeViewRef.current) return null;
+      const formData = new FormData();
 
-      const uri = await captureRef(mergeViewRef.current, {
-        format: 'png',
-        quality: 1, // جودة 100%
+      // إضافة كل الصور إلى FormData
+      images.forEach((img, index) => {
+        formData.append('images', {
+          uri: img.uri,
+          type: img.mimeType || 'image/png',
+          name: img.name || `image_${index}.png`,
+        } as any);
       });
-      return uri;
+
+      // إرسال إعداد توحيد العرض
+      formData.append('unifyWidth', unifyWidth ? 'true' : 'false');
+
+      // إرسال الطلب إلى الخادم
+      const response = await fetch(`${SERVER_URL}/merge`, {
+        method: 'POST',
+        body: formData,
+      });
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        console.error('Server error:', response.status, errorText);
+        return null;
+      }
+
+      // استلام الصورة الناتجة كـ blob
+      const blob = await response.blob();
+      
+      // تحويل blob إلى base64
+      const reader = new FileReader();
+      const base64Promise = new Promise<string>((resolve, reject) => {
+        reader.onload = () => {
+          const base64data = (reader.result as string).split(',')[1];
+          resolve(base64data);
+        };
+        reader.onerror = reject;
+      });
+      reader.readAsDataURL(blob);
+      const base64 = await base64Promise;
+
+      // حفظ الملف المؤقت على الجهاز
+      const fileUri = FileSystem.cacheDirectory + 'merged_result.png';
+      await FileSystem.writeAsStringAsync(fileUri, base64, {
+        encoding: FileSystem.EncodingType.Base64,
+      });
+
+      return fileUri;
     } catch (error) {
-      console.error('Merge failed', error);
+      console.error('Merge upload failed', error);
       return null;
     } finally {
       setIsMerging(false);
-      setShowCaptureView(false);
     }
   };
 
   const mergeStart = async () => {
     if (!images.length) return;
-    const uri = await performMerge();
+    const uri = await uploadAndMerge();
     if (uri) {
       setMergedImageUri(uri);
       setResultReady(true);
@@ -136,7 +161,7 @@ export function ImageMergeScreen({
         description: `تم توليد ناتج دمج عمودي لـ ${images.length} صور بجودة أصلية.`,
       });
     } else {
-      alert('فشل الدمج، قد يكون حجم الصور ضخماً جداً على ذاكرة الجهاز.');
+      alert('فشل الدمج على الخادم، تأكد من اتصالك بالإنترنت ومن أن الخادم يعمل.');
     }
   };
 
@@ -228,84 +253,6 @@ export function ImageMergeScreen({
       return StatusBar.currentHeight || 0;
     }
     return 44;
-  };
-
-  // المكون الخفي للدمج: يتم استخدام PixelRatio لضمان التطابق 1:1 مع دقة الصور الأصلية
-  const renderMergeCaptureView = () => {
-    if (images.length === 0) return null;
-    let maxWidth = 0;
-    for (const img of images) {
-      const w = img.width || 1080;
-      if (w > maxWidth) maxWidth = w;
-    }
-
-    const pr = PixelRatio.get();
-
-    const items = images.map((img) => {
-      const originalWidth = img.width || 1080;
-      const originalHeight = img.height || 1080;
-      const targetWidth = unifyWidth ? maxWidth : originalWidth;
-      const targetHeight = (originalHeight * targetWidth) / originalWidth;
-      return {
-        ...img,
-        targetWidth,
-        targetHeight,
-        logicalWidth: targetWidth / pr,
-        logicalHeight: targetHeight / pr,
-      };
-    });
-
-    let totalLogicalHeight = 0;
-    const logicalGap = GAP / pr;
-    for (let i = 0; i < items.length; i++) {
-      totalLogicalHeight += items[i].logicalHeight;
-      if (i < items.length - 1) totalLogicalHeight += logicalGap;
-    }
-    const maxLogicalWidth = maxWidth / pr;
-
-    return (
-      <View
-        style={{
-          position: 'absolute',
-          top: Dimensions.get('window').height * 2, // خارج الشاشة لتجنب تشوه الواجهة
-          left: 0,
-          opacity: 1, // يجب ان يبقى 1 لضمان الرندر في الأندرويد
-        }}
-        pointerEvents="none"
-      >
-        <View
-          ref={mergeViewRef}
-          collapsable={false}
-          style={{
-            width: maxLogicalWidth,
-            height: totalLogicalHeight,
-            backgroundColor: 'transparent', // يضمن عدم وجود خلفية سوداء
-            flexDirection: 'column',
-          }}
-        >
-          {items.map((item, idx) => (
-            <View key={`capture-${item.id}`}>
-              <Image
-                source={{ uri: item.uri }}
-                style={{
-                  width: item.logicalWidth,
-                  height: item.logicalHeight,
-                }}
-                resizeMode="cover"
-                onLoad={() => {
-                  loadedImagesCountRef.current += 1;
-                }}
-                onError={() => {
-                  // في حال فشل تحميل صورة نتجاهلها حتى لا يعلق الدمج
-                  loadedImagesCountRef.current += 1;
-                }}
-              />
-              {idx < items.length - 1 && <View style={{ height: logicalGap }} />}
-            </View>
-          ))}
-        </View>
-      </View>
-    );
   };
 
   return (
@@ -487,9 +434,6 @@ export function ImageMergeScreen({
           </View>
         </View>
       )}
-
-      {/* Hidden capture view */}
-      {showCaptureView && renderMergeCaptureView()}
 
       {/* Real preview modal */}
       <Modal
