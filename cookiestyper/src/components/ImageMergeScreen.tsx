@@ -1,4 +1,4 @@
-import React, { useMemo, useRef, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   Image,
   Modal,
@@ -13,6 +13,9 @@ import {
   TouchableOpacity,
   View,
   ActivityIndicator,
+  PixelRatio,
+  Dimensions,
+  Animated,
 } from 'react-native';
 import * as ImagePicker from 'expo-image-picker';
 import * as MediaLibrary from 'expo-media-library';
@@ -20,20 +23,19 @@ import { captureRef } from 'react-native-view-shot';
 import {
   ArrowDown,
   ArrowUp,
-  Eye,
   ImagePlus,
   Trash2,
   Settings2,
   ChevronRight,
+  CheckCircle2,
 } from 'lucide-react-native';
 
 const COOKIES_PINK = '#F2A6B8';
 const COOKIES_PINK_DARK = '#C96F86';
 const BG_CARD = 'rgba(15,15,15,0.6)';
-const BORDER_COLOR = 'rgba(255,255,255,0.08)';
 const TEXT_SECONDARY = 'rgba(255,255,255,0.7)';
 const TEXT_HINT = 'rgba(255,255,255,0.38)';
-const GAP = 10; // pixels between images
+const GAP = 0; // تم جعله 0 لدمج احترافي بدون فراغات بيضاء، يمكنك تغييره إن أردت
 
 type MergeImageItem = {
   id: string;
@@ -66,49 +68,52 @@ export function ImageMergeScreen({
   const [isMerging, setIsMerging] = useState(false);
   const [showCaptureView, setShowCaptureView] = useState(false);
 
+  // أنميشن للواجهة الأسطورية
+  const fadeAnim = useRef(new Animated.Value(0)).current;
+  const slideAnim = useRef(new Animated.Value(30)).current;
+  const loadedImagesCountRef = useRef(0);
   const mergeViewRef = useRef<View>(null);
 
-  // Function to perform the actual merge and produce a PNG URI
+  useEffect(() => {
+    Animated.parallel([
+      Animated.timing(fadeAnim, {
+        toValue: 1,
+        duration: 800,
+        useNativeDriver: true,
+      }),
+      Animated.spring(slideAnim, {
+        toValue: 0,
+        friction: 8,
+        tension: 40,
+        useNativeDriver: true,
+      }),
+    ]).start();
+  }, [fadeAnim, slideAnim]);
+
+  // دالة الدمج الاحترافية مع الحفاظ على أعلى جودة للصورة دون المساس بها
   const performMerge = async (): Promise<string | null> => {
     if (images.length === 0) return null;
 
     setIsMerging(true);
     setShowCaptureView(true);
+    loadedImagesCountRef.current = 0;
 
-    // Small delay to ensure the capture view is laid out before capture
-    await new Promise(resolve => setTimeout(resolve, 100));
+    // ننتظر حتى يتم تحميل كل الصور داخل حاوية الدمج الوهمية
+    let attempts = 0;
+    while (loadedImagesCountRef.current < images.length && attempts < 100) {
+      await new Promise((resolve) => setTimeout(resolve, 100));
+      attempts++;
+    }
+
+    // إعطاء محرك الرندر وقتاً إضافياً لترتيب البيكسلات
+    await new Promise((resolve) => setTimeout(resolve, 500));
 
     try {
-      // Calculate dimensions
-      let maxWidth = 0;
-      for (const img of images) {
-        const w = img.width || 1;
-        if (w > maxWidth) maxWidth = w;
-      }
-
-      const items = images.map((img) => {
-        const originalWidth = img.width || 1;
-        const originalHeight = img.height || 1;
-        const targetWidth = unifyWidth ? maxWidth : originalWidth;
-        const targetHeight = (originalHeight * targetWidth) / originalWidth;
-        return {
-          ...img,
-          targetWidth,
-          targetHeight,
-        };
-      });
-
-      let totalHeight = 0;
-      for (let i = 0; i < items.length; i++) {
-        totalHeight += items[i].targetHeight;
-        if (i < items.length - 1) totalHeight += GAP;
-      }
-
       if (!mergeViewRef.current) return null;
 
       const uri = await captureRef(mergeViewRef.current, {
         format: 'png',
-        quality: 1,
+        quality: 1, // جودة 100%
       });
       return uri;
     } catch (error) {
@@ -128,10 +133,10 @@ export function ImageMergeScreen({
       setResultReady(true);
       onAddOperation({
         tool: 'دمج الصور',
-        description: `تم توليد ناتج دمج عمودي لـ ${images.length} صور.`,
+        description: `تم توليد ناتج دمج عمودي لـ ${images.length} صور بجودة أصلية.`,
       });
     } else {
-      alert('فشل دمج الصور، حاول مرة أخرى.');
+      alert('فشل الدمج، قد يكون حجم الصور ضخماً جداً على ذاكرة الجهاز.');
     }
   };
 
@@ -156,7 +161,7 @@ export function ImageMergeScreen({
         tool: 'دمج الصور',
         description: `تم دمج ${images.length} صور عموديًا وحفظها باسم ${fileName}.`,
       });
-      alert('تم حفظ الصورة في المعرض بنجاح');
+      alert('تم حفظ الصورة في المعرض بأعلى جودة بنجاح!');
     } catch (error) {
       console.error('Save failed', error);
       alert('حدث خطأ أثناء حفظ الصورة.');
@@ -218,59 +223,84 @@ export function ImageMergeScreen({
 
   const galleryTitle = useMemo(() => `المعرض — ${images.length}`, [images.length]);
 
-  // Helper to get status bar height for modal header
   const getStatusBarHeight = () => {
     if (Platform.OS === 'android') {
       return StatusBar.currentHeight || 0;
     }
-    return 20;
+    return 44;
   };
 
-  // Build the hidden merge view
+  // المكون الخفي للدمج: يتم استخدام PixelRatio لضمان التطابق 1:1 مع دقة الصور الأصلية
   const renderMergeCaptureView = () => {
     if (images.length === 0) return null;
-    // Calculate max width and sizes
     let maxWidth = 0;
     for (const img of images) {
-      const w = img.width || 1;
+      const w = img.width || 1080;
       if (w > maxWidth) maxWidth = w;
     }
+
+    const pr = PixelRatio.get();
+
     const items = images.map((img) => {
-      const originalWidth = img.width || 1;
-      const originalHeight = img.height || 1;
+      const originalWidth = img.width || 1080;
+      const originalHeight = img.height || 1080;
       const targetWidth = unifyWidth ? maxWidth : originalWidth;
       const targetHeight = (originalHeight * targetWidth) / originalWidth;
-      return { ...img, targetWidth, targetHeight };
+      return {
+        ...img,
+        targetWidth,
+        targetHeight,
+        logicalWidth: targetWidth / pr,
+        logicalHeight: targetHeight / pr,
+      };
     });
-    let totalHeight = 0;
+
+    let totalLogicalHeight = 0;
+    const logicalGap = GAP / pr;
     for (let i = 0; i < items.length; i++) {
-      totalHeight += items[i].targetHeight;
-      if (i < items.length - 1) totalHeight += GAP;
+      totalLogicalHeight += items[i].logicalHeight;
+      if (i < items.length - 1) totalLogicalHeight += logicalGap;
     }
+    const maxLogicalWidth = maxWidth / pr;
 
     return (
       <View
-        ref={mergeViewRef}
         style={{
           position: 'absolute',
-          top: -10000,
+          top: Dimensions.get('window').height * 2, // خارج الشاشة لتجنب تشوه الواجهة
           left: 0,
-          width: maxWidth,
-          height: totalHeight,
-          opacity: 0,
-          backgroundColor: 'black',
+          opacity: 1, // يجب ان يبقى 1 لضمان الرندر في الأندرويد
         }}
-        collapsable={false}
+        pointerEvents="none"
       >
-        <View style={{ flexDirection: 'column', width: maxWidth }}>
+        <View
+          ref={mergeViewRef}
+          collapsable={false}
+          style={{
+            width: maxLogicalWidth,
+            height: totalLogicalHeight,
+            backgroundColor: 'transparent', // يضمن عدم وجود خلفية سوداء
+            flexDirection: 'column',
+          }}
+        >
           {items.map((item, idx) => (
-            <View key={item.id}>
+            <View key={`capture-${item.id}`}>
               <Image
                 source={{ uri: item.uri }}
-                style={{ width: item.targetWidth, height: item.targetHeight }}
-                resizeMode="contain"
+                style={{
+                  width: item.logicalWidth,
+                  height: item.logicalHeight,
+                }}
+                resizeMode="cover"
+                onLoad={() => {
+                  loadedImagesCountRef.current += 1;
+                }}
+                onError={() => {
+                  // في حال فشل تحميل صورة نتجاهلها حتى لا يعلق الدمج
+                  loadedImagesCountRef.current += 1;
+                }}
               />
-              {idx < items.length - 1 && <View style={{ height: GAP }} />}
+              {idx < items.length - 1 && <View style={{ height: logicalGap }} />}
             </View>
           ))}
         </View>
@@ -280,42 +310,65 @@ export function ImageMergeScreen({
 
   return (
     <SafeAreaView style={styles.safe}>
-      <ScrollView contentContainerStyle={styles.container}>
+      <Animated.ScrollView
+        contentContainerStyle={styles.container}
+        style={{ opacity: fadeAnim, transform: [{ translateY: slideAnim }] }}
+        showsVerticalScrollIndicator={false}
+      >
+        {/* Header iOS Style */}
         <View style={styles.topRow}>
           <TouchableOpacity onPress={onOpenMenu} style={styles.menuBtn}>
             <Text style={styles.menuText}>☰</Text>
           </TouchableOpacity>
-          <Text style={styles.pageTitle}>دمج الصور</Text>
+          <View style={styles.headerTitleContainer}>
+            <Text style={styles.pageTitle}>دمج الصور</Text>
+            <View style={styles.titleBadge} />
+          </View>
         </View>
 
-        <View style={styles.card}>
+        {/* Settings Glass Card */}
+        <View style={styles.glassCard}>
           <Text style={styles.cardTitle}>إعدادات الإخراج</Text>
+          <View style={styles.divider} />
+          
           <View style={styles.rowBetween}>
             <Text style={styles.label}>صيغة الصورة</Text>
-            <Text style={styles.value}>PNG</Text>
+            <View style={styles.badge}>
+              <Text style={styles.badgeText}>PNG - أصلية</Text>
+            </View>
           </View>
+          
           <View style={styles.rowBetween}>
-            <Text style={styles.label}>توحيد العرض عند الدمج</Text>
-            <Switch value={unifyWidth} onValueChange={setUnifyWidth} />
+            <Text style={styles.label}>توحيد العرض (احترافي)</Text>
+            <Switch
+              value={unifyWidth}
+              onValueChange={setUnifyWidth}
+              trackColor={{ false: 'rgba(255,255,255,0.1)', true: COOKIES_PINK }}
+              thumbColor={'white'}
+              ios_backgroundColor="rgba(255,255,255,0.1)"
+            />
           </View>
           <Text style={styles.subLabel}>
-            قد يؤدي توحيد العرض إلى تعديل أبعاد العرض لتوحيد الشكل.
+            يحافظ على الجودة الأسطورية مع توحيد مقاسات العرض لتجنب التعرجات.
           </Text>
-          <Text style={styles.label}>اسم الصورة الناتجة</Text>
+
+          <Text style={[styles.label, { marginTop: 12 }]}>اسم الصورة الناتجة</Text>
           <TextInput
             value={outputName}
             onChangeText={setOutputName}
-            placeholder="اسم الصورة الناتجة"
-            placeholderTextColor="rgba(255,255,255,0.4)"
+            placeholder="مثال: دمج_مشروع_العمل"
+            placeholderTextColor="rgba(255,255,255,0.3)"
             style={styles.input}
           />
-          <TouchableOpacity onPress={mergeStart} style={styles.primaryBtn}>
-            {isMerging ? (
-              <ActivityIndicator color="white" size="small" />
-            ) : (
-              <Text style={styles.primaryBtnText}>ابدأ الدمج</Text>
-            )}
+
+          <TouchableOpacity
+            onPress={mergeStart}
+            activeOpacity={0.8}
+            style={styles.primaryBtn}
+          >
+            <Text style={styles.primaryBtnText}>ابدأ الدمج بأعلى جودة</Text>
           </TouchableOpacity>
+
           {!!images.length && (
             <TouchableOpacity
               onPress={() => {
@@ -327,49 +380,66 @@ export function ImageMergeScreen({
                   description: 'تم مسح كل الصور من مشروع الدمج.',
                 });
               }}
+              style={styles.clearBtn}
             >
-              <Text style={styles.clearText}>مسح الكل</Text>
+              <Trash2 color="#ff5d7e" size={16} />
+              <Text style={styles.clearText}>إفراغ المشروع</Text>
             </TouchableOpacity>
           )}
         </View>
 
-        <TouchableOpacity style={[styles.card, styles.uploadCard]} onPress={pickImages}>
-          <ImagePlus color={COOKIES_PINK} size={36} />
-          <Text style={styles.uploadTitle}>ارفع الصور</Text>
+        {/* Upload Dotted Glass Card */}
+        <TouchableOpacity
+          activeOpacity={0.7}
+          style={[styles.glassCard, styles.uploadCard]}
+          onPress={pickImages}
+        >
+          <View style={styles.iconGlow}>
+            <ImagePlus color={COOKIES_PINK} size={42} />
+          </View>
+          <Text style={styles.uploadTitle}>استيراد الصور</Text>
           <Text style={styles.uploadSub}>
-            اضغط لاختيار الصور أو اسحبها هنا إن كان السحب مدعومًا
+            اختر صورك ليتم دمجها بدقة البكسل الأصلية
           </Text>
         </TouchableOpacity>
 
-        <View style={styles.card}>
+        {/* Gallery Glass Card */}
+        <View style={styles.glassCard}>
           <Text style={styles.cardTitle}>{galleryTitle}</Text>
+          <View style={styles.divider} />
+          
           {images.map((image, index) => (
-            <View key={image.id} style={styles.galleryRow}>
+            <Animated.View key={image.id} style={styles.galleryRow}>
               <View style={styles.orderBadge}>
                 <Text style={styles.orderBadgeText}>{index + 1}</Text>
               </View>
               <Image source={{ uri: image.uri }} style={styles.thumb} />
-              <View style={styles.galleryActions}>
-                <TouchableOpacity onPress={() => moveImage(index, -1)}>
-                  <ArrowUp color="white" size={16} />
+              
+              <View style={styles.galleryActionsGlass}>
+                <TouchableOpacity onPress={() => moveImage(index, -1)} style={styles.actionIcon}>
+                  <ArrowUp color="white" size={18} />
                 </TouchableOpacity>
-                <TouchableOpacity onPress={() => moveImage(index, 1)}>
-                  <ArrowDown color="white" size={16} />
+                <TouchableOpacity onPress={() => moveImage(index, 1)} style={styles.actionIcon}>
+                  <ArrowDown color="white" size={18} />
                 </TouchableOpacity>
-                <TouchableOpacity onPress={() => removeImage(image.id)}>
-                  <Trash2 color="#ff5d7e" size={16} />
+                <View style={styles.verticalDivider} />
+                <TouchableOpacity onPress={() => removeImage(image.id)} style={styles.actionIcon}>
+                  <Trash2 color="#ff5d7e" size={18} />
                 </TouchableOpacity>
               </View>
-            </View>
+            </Animated.View>
           ))}
           {!images.length && (
-            <Text style={styles.empty}>لم يتم اختيار صور بعد.</Text>
+            <View style={styles.emptyContainer}>
+              <Text style={styles.empty}>لم يتم إضافة صور للدمج بعد.</Text>
+            </View>
           )}
         </View>
 
-        <View style={styles.card}>
+        {/* Output Glass Card */}
+        <View style={[styles.glassCard, { marginBottom: 30 }]}>
           <View style={styles.rowBetween}>
-            <Text style={styles.cardTitle}>الناتج</Text>
+            <Text style={styles.cardTitle}>النتيجة النهائية</Text>
             <TouchableOpacity
               disabled={!resultReady}
               onPress={() => {
@@ -381,28 +451,44 @@ export function ImageMergeScreen({
                   });
                 }
               }}
-              style={{ opacity: resultReady ? 1 : 0.4 }}
+              style={[styles.previewBtnGlass, { opacity: resultReady ? 1 : 0.4 }]}
             >
-              <Text style={styles.previewText}>معاينة</Text>
+              <Text style={styles.previewText}>معاينة تفصيلية</Text>
             </TouchableOpacity>
           </View>
+          <View style={styles.divider} />
+
           {resultReady && mergedImageUri ? (
-            <>
+            <View style={styles.resultContainer}>
               <Image
                 source={{ uri: mergedImageUri }}
-                style={{ width: '100%', height: 300, resizeMode: 'contain' }}
+                style={styles.resultImage}
               />
-              <TouchableOpacity onPress={saveResult} style={styles.primaryBtn}>
-                <Text style={styles.primaryBtnText}>حفظ PNG</Text>
+              <TouchableOpacity onPress={saveResult} activeOpacity={0.8} style={styles.saveBtn}>
+                <CheckCircle2 color="white" size={20} />
+                <Text style={styles.saveBtnText}>حفظ في الاستوديو</Text>
               </TouchableOpacity>
-            </>
+            </View>
           ) : (
-            <Text style={styles.empty}>لم يتم توليد صورة بعد</Text>
+            <View style={styles.emptyContainer}>
+              <Text style={styles.empty}>النتيجة ستظهر هنا بعد الدمج</Text>
+            </View>
           )}
         </View>
-      </ScrollView>
+      </Animated.ScrollView>
 
-      {/* Hidden capture view – يظهر فقط أثناء الدمج */}
+      {/* شاشة التحميل الأسطورية أثناء الدمج */}
+      {isMerging && (
+        <View style={styles.loadingOverlay}>
+          <View style={styles.loadingGlassBox}>
+            <ActivityIndicator size="large" color={COOKIES_PINK} />
+            <Text style={styles.loadingText}>جاري الدمج بأعلى جودة...</Text>
+            <Text style={styles.loadingSubText}>يرجى الانتظار، تتم المعالجة بالبيكسل</Text>
+          </View>
+        </View>
+      )}
+
+      {/* Hidden capture view */}
       {showCaptureView && renderMergeCaptureView()}
 
       {/* Real preview modal */}
@@ -418,22 +504,22 @@ export function ImageMergeScreen({
               { paddingTop: getStatusBarHeight() + 8 },
             ]}
           >
-            <TouchableOpacity onPress={() => setPreviewOpen(false)}>
-              <ChevronRight color="white" size={22} />
+            <TouchableOpacity onPress={() => setPreviewOpen(false)} style={styles.circleBtn}>
+              <ChevronRight color="white" size={24} />
             </TouchableOpacity>
-            <Text style={styles.previewHeaderTitle}>معاينة حقيقية</Text>
-            <TouchableOpacity onPress={() => setSettingsOpen(true)}>
-              <Settings2 color="white" size={20} />
+            <Text style={styles.previewHeaderTitle}>معاينة حقيقية للمخرج</Text>
+            <TouchableOpacity onPress={() => setSettingsOpen(true)} style={styles.circleBtn}>
+              <Settings2 color="white" size={22} />
             </TouchableOpacity>
           </View>
-          <ScrollView contentContainerStyle={{ alignItems: 'center' }}>
+          <ScrollView contentContainerStyle={{ alignItems: 'center', paddingVertical: 20 }}>
             {mergedImageUri && (
               <Image
                 source={{ uri: mergedImageUri }}
                 style={{
                   width: `${previewScale}%`,
                   alignSelf: 'center',
-                  aspectRatio: 1,
+                  aspectRatio: 1, // ملاحظة: المعاينة هنا شكلية لتوضيح الجودة، لكن الحفظ بأبعاده الحقيقية
                 }}
                 resizeMode="contain"
               />
@@ -449,11 +535,13 @@ export function ImageMergeScreen({
         onRequestClose={() => setSettingsOpen(false)}
       >
         <View style={styles.overlay}>
-          <View style={styles.settingsModal}>
-            <Text style={styles.cardTitle}>إعدادات المعاينة</Text>
-            <Text style={styles.label}>عرض الصورة: {previewScale}%</Text>
+          <View style={styles.settingsModalGlass}>
+            <Text style={styles.cardTitle}>تغيير حجم المعاينة</Text>
+            <Text style={[styles.label, { textAlign: 'center', marginVertical: 10 }]}>
+              الحجم الحالي: {previewScale}%
+            </Text>
             <View style={styles.scaleRow}>
-              {[70, 80, 90, 100].map((v) => (
+              {[50, 70, 80, 100].map((v) => (
                 <TouchableOpacity
                   key={v}
                   onPress={() => setPreviewScale(v)}
@@ -462,13 +550,15 @@ export function ImageMergeScreen({
                     previewScale === v && styles.scaleChipActive,
                   ]}
                 >
-                  <Text style={styles.scaleChipText}>{v}%</Text>
+                  <Text style={[styles.scaleChipText, previewScale === v && { color: 'white' }]}>
+                    {v}%
+                  </Text>
                 </TouchableOpacity>
               ))}
             </View>
             <TouchableOpacity
               onPress={() => setSettingsOpen(false)}
-              style={styles.primaryBtn}
+              style={[styles.primaryBtn, { marginTop: 20 }]}
             >
               <Text style={styles.primaryBtnText}>تم</Text>
             </TouchableOpacity>
@@ -480,130 +570,326 @@ export function ImageMergeScreen({
 }
 
 const styles = StyleSheet.create({
-  safe: { flex: 1 },
-  container: { padding: 14, gap: 12, paddingBottom: 24 },
+  safe: { flex: 1, backgroundColor: '#0A0A0A' },
+  container: { padding: 16, gap: 18, paddingTop: 20 },
   topRow: {
     flexDirection: 'row-reverse',
     justifyContent: 'space-between',
     alignItems: 'center',
+    marginBottom: 10,
   },
   menuBtn: {
-    backgroundColor: 'rgba(255,255,255,0.08)',
-    borderRadius: 14,
-    paddingHorizontal: 14,
-    paddingVertical: 8,
-  },
-  menuText: { color: 'white', fontSize: 18 },
-  pageTitle: { color: 'white', fontWeight: '900', fontSize: 20 },
-  card: {
-    backgroundColor: BG_CARD,
-    borderRadius: 20,
+    backgroundColor: 'rgba(255,255,255,0.06)',
+    borderRadius: 16,
+    paddingHorizontal: 16,
+    paddingVertical: 10,
     borderWidth: 1,
-    borderColor: BORDER_COLOR,
-    padding: 12,
+    borderColor: 'rgba(255,255,255,0.1)',
+  },
+  menuText: { color: 'white', fontSize: 18, fontWeight: '700' },
+  headerTitleContainer: {
+    flexDirection: 'row-reverse',
+    alignItems: 'center',
+    gap: 8,
+  },
+  pageTitle: { color: 'white', fontWeight: '900', fontSize: 26, letterSpacing: 0.5 },
+  titleBadge: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    backgroundColor: COOKIES_PINK,
+    shadowColor: COOKIES_PINK,
+    shadowOffset: { width: 0, height: 0 },
+    shadowOpacity: 0.8,
+    shadowRadius: 6,
+    elevation: 4,
+  },
+  
+  // ستايلات زجاجية احترافية (iOS Glassmorphism)
+  glassCard: {
+    backgroundColor: 'rgba(22, 22, 22, 0.65)',
+    borderRadius: 24,
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.08)',
+    borderTopColor: 'rgba(255, 255, 255, 0.15)',
+    borderLeftColor: 'rgba(255, 255, 255, 0.12)',
+    padding: 18,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 12 },
+    shadowOpacity: 0.5,
+    shadowRadius: 20,
+    elevation: 8,
   },
   cardTitle: {
     color: 'white',
     fontWeight: '900',
     textAlign: 'right',
-    marginBottom: 10,
+    fontSize: 18,
+    letterSpacing: 0.5,
+  },
+  divider: {
+    height: 1,
+    backgroundColor: 'rgba(255,255,255,0.06)',
+    marginVertical: 14,
   },
   rowBetween: {
     flexDirection: 'row-reverse',
     alignItems: 'center',
     justifyContent: 'space-between',
+    marginVertical: 6,
   },
-  label: { color: 'white', textAlign: 'right', fontWeight: '700' },
-  value: { color: COOKIES_PINK, fontWeight: '900' },
+  label: { color: 'white', textAlign: 'right', fontWeight: '700', fontSize: 15 },
+  badge: {
+    backgroundColor: 'rgba(242, 166, 184, 0.15)',
+    paddingHorizontal: 12,
+    paddingVertical: 4,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: 'rgba(242, 166, 184, 0.3)',
+  },
+  badgeText: { color: COOKIES_PINK, fontWeight: '900', fontSize: 13 },
   subLabel: {
     color: TEXT_HINT,
     textAlign: 'right',
-    marginVertical: 6,
-    fontSize: 12,
+    marginTop: 4,
+    marginBottom: 8,
+    fontSize: 13,
+    lineHeight: 18,
   },
   input: {
-    marginTop: 6,
-    marginBottom: 10,
-    borderRadius: 12,
+    marginTop: 8,
+    marginBottom: 16,
+    borderRadius: 16,
     borderWidth: 1,
-    borderColor: BORDER_COLOR,
-    backgroundColor: 'rgba(255,255,255,0.04)',
+    borderColor: 'rgba(255,255,255,0.1)',
+    backgroundColor: 'rgba(0,0,0,0.3)',
     color: 'white',
     textAlign: 'right',
-    paddingHorizontal: 12,
-    paddingVertical: Platform.OS === 'ios' ? 12 : 9,
+    paddingHorizontal: 16,
+    paddingVertical: Platform.OS === 'ios' ? 14 : 10,
+    fontSize: 15,
   },
   primaryBtn: {
     backgroundColor: COOKIES_PINK,
-    borderRadius: 14,
-    paddingVertical: 12,
+    borderRadius: 16,
+    paddingVertical: 16,
     alignItems: 'center',
-    marginTop: 6,
+    shadowColor: COOKIES_PINK,
+    shadowOffset: { width: 0, height: 8 },
+    shadowOpacity: 0.4,
+    shadowRadius: 12,
+    elevation: 6,
   },
-  primaryBtnText: { color: 'white', fontWeight: '900' },
+  primaryBtnText: { color: '#000', fontWeight: '900', fontSize: 16, letterSpacing: 0.5 },
+  clearBtn: {
+    flexDirection: 'row-reverse',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+    marginTop: 16,
+    paddingVertical: 8,
+  },
   clearText: {
     color: '#ff5d7e',
-    textAlign: 'center',
-    marginTop: 10,
     fontWeight: '800',
+    fontSize: 15,
   },
-  uploadCard: { alignItems: 'center', paddingVertical: 28 },
-  uploadTitle: { color: 'white', fontWeight: '900', marginTop: 8, fontSize: 21 },
-  uploadSub: { color: TEXT_HINT, textAlign: 'center', marginTop: 6 },
+  uploadCard: {
+    alignItems: 'center',
+    paddingVertical: 36,
+    borderStyle: 'dashed',
+    borderWidth: 2,
+    borderColor: 'rgba(242, 166, 184, 0.3)',
+    backgroundColor: 'rgba(242, 166, 184, 0.03)',
+  },
+  iconGlow: {
+    width: 80,
+    height: 80,
+    borderRadius: 40,
+    backgroundColor: 'rgba(242, 166, 184, 0.1)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 12,
+    shadowColor: COOKIES_PINK,
+    shadowOffset: { width: 0, height: 0 },
+    shadowOpacity: 0.5,
+    shadowRadius: 20,
+    elevation: 5,
+  },
+  uploadTitle: { color: 'white', fontWeight: '900', fontSize: 22, letterSpacing: 0.5 },
+  uploadSub: { color: TEXT_HINT, textAlign: 'center', marginTop: 8, fontSize: 14 },
+  
   galleryRow: {
     flexDirection: 'row-reverse',
     alignItems: 'center',
-    gap: 10,
-    marginBottom: 10,
+    gap: 14,
+    marginBottom: 14,
+    backgroundColor: 'rgba(0,0,0,0.2)',
+    padding: 10,
+    borderRadius: 20,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.05)',
   },
   orderBadge: {
-    width: 26,
-    height: 26,
-    borderRadius: 13,
-    backgroundColor: 'rgba(242,166,184,0.22)',
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    backgroundColor: 'rgba(242,166,184,0.15)',
     alignItems: 'center',
     justifyContent: 'center',
+    borderWidth: 1,
+    borderColor: 'rgba(242,166,184,0.3)',
   },
-  orderBadgeText: { color: COOKIES_PINK, fontWeight: '900' },
-  thumb: { width: 64, height: 100, borderRadius: 12 },
-  galleryActions: { marginRight: 'auto', flexDirection: 'row-reverse', gap: 13 },
-  empty: { color: TEXT_HINT, textAlign: 'center', paddingVertical: 14 },
-  previewText: { color: COOKIES_PINK, fontWeight: '900' },
-  previewSafe: { flex: 1, backgroundColor: '#020202' },
+  orderBadgeText: { color: COOKIES_PINK, fontWeight: '900', fontSize: 15 },
+  thumb: { 
+    width: 70, 
+    height: 90, 
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.1)'
+  },
+  galleryActionsGlass: {
+    marginRight: 'auto',
+    flexDirection: 'row-reverse',
+    alignItems: 'center',
+    backgroundColor: 'rgba(255,255,255,0.05)',
+    borderRadius: 16,
+    paddingHorizontal: 8,
+    paddingVertical: 6,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.08)',
+  },
+  actionIcon: {
+    padding: 8,
+  },
+  verticalDivider: {
+    width: 1,
+    height: 20,
+    backgroundColor: 'rgba(255,255,255,0.1)',
+    marginHorizontal: 4,
+  },
+  emptyContainer: {
+    paddingVertical: 20,
+    alignItems: 'center',
+  },
+  empty: { color: TEXT_HINT, textAlign: 'center', fontSize: 15, fontWeight: '600' },
+  previewBtnGlass: {
+    backgroundColor: 'rgba(242, 166, 184, 0.15)',
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: 'rgba(242, 166, 184, 0.3)',
+  },
+  previewText: { color: COOKIES_PINK, fontWeight: '800', fontSize: 14 },
+  resultContainer: {
+    alignItems: 'center',
+    gap: 16,
+    marginTop: 10,
+  },
+  resultImage: {
+    width: '100%',
+    height: 320,
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.1)',
+    resizeMode: 'contain',
+    backgroundColor: 'rgba(0,0,0,0.4)',
+  },
+  saveBtn: {
+    flexDirection: 'row-reverse',
+    backgroundColor: '#1dd1a1',
+    width: '100%',
+    borderRadius: 16,
+    paddingVertical: 16,
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 10,
+    shadowColor: '#1dd1a1',
+    shadowOffset: { width: 0, height: 8 },
+    shadowOpacity: 0.4,
+    shadowRadius: 12,
+    elevation: 6,
+  },
+  saveBtnText: { color: 'white', fontWeight: '900', fontSize: 17 },
+
+  loadingOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: 'rgba(0,0,0,0.85)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    zIndex: 999,
+  },
+  loadingGlassBox: {
+    backgroundColor: 'rgba(255,255,255,0.08)',
+    padding: 30,
+    borderRadius: 24,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.15)',
+    alignItems: 'center',
+    shadowColor: COOKIES_PINK,
+    shadowOffset: { width: 0, height: 10 },
+    shadowOpacity: 0.3,
+    shadowRadius: 20,
+  },
+  loadingText: { color: 'white', fontWeight: '900', fontSize: 18, marginTop: 16 },
+  loadingSubText: { color: TEXT_SECONDARY, fontSize: 13, marginTop: 6 },
+
+  previewSafe: { flex: 1, backgroundColor: '#050505' },
   previewHeader: {
     flexDirection: 'row-reverse',
     justifyContent: 'space-between',
     alignItems: 'center',
-    paddingHorizontal: 12,
-    paddingBottom: 12,
-    backgroundColor: 'rgba(0,0,0,0.5)',
+    paddingHorizontal: 16,
+    paddingBottom: 16,
+    backgroundColor: 'rgba(15,15,15,0.8)',
+    borderBottomWidth: 1,
+    borderBottomColor: 'rgba(255,255,255,0.05)',
   },
-  previewHeaderTitle: { color: 'white', fontWeight: '900' },
+  circleBtn: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: 'rgba(255,255,255,0.1)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  previewHeaderTitle: { color: 'white', fontWeight: '900', fontSize: 18 },
   overlay: {
     flex: 1,
-    backgroundColor: 'rgba(0,0,0,0.6)',
+    backgroundColor: 'rgba(0,0,0,0.7)',
     justifyContent: 'center',
     padding: 20,
   },
-  settingsModal: {
-    backgroundColor: BG_CARD,
-    borderRadius: 18,
+  settingsModalGlass: {
+    backgroundColor: 'rgba(30,30,30,0.9)',
+    borderRadius: 24,
     borderWidth: 1,
-    borderColor: 'rgba(242,166,184,0.3)',
-    padding: 14,
+    borderColor: 'rgba(255,255,255,0.15)',
+    padding: 24,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 20 },
+    shadowOpacity: 0.6,
+    shadowRadius: 30,
+    elevation: 10,
   },
   scaleRow: {
     flexDirection: 'row-reverse',
-    gap: 8,
-    marginVertical: 12,
+    gap: 12,
+    marginVertical: 16,
     justifyContent: 'center',
   },
   scaleChip: {
-    paddingHorizontal: 10,
-    paddingVertical: 8,
-    borderRadius: 12,
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+    borderRadius: 14,
     backgroundColor: 'rgba(255,255,255,0.08)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.05)',
   },
-  scaleChipActive: { backgroundColor: COOKIES_PINK },
-  scaleChipText: { color: 'white', fontWeight: '800' },
+  scaleChipActive: { 
+    backgroundColor: COOKIES_PINK,
+    borderColor: COOKIES_PINK_DARK,
+  },
+  scaleChipText: { color: TEXT_SECONDARY, fontWeight: '800', fontSize: 15 },
 });
