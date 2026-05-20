@@ -29,6 +29,11 @@
     },
     "plugins": [
       "./withFloatingAssistant"
-    ]
+    ],
+    "extra": {
+      "eas": {
+        "projectId": "a38a52f2-b606-4f73-b9a0-0729c3b3c6cc"
+      }
+    }
   }
 }

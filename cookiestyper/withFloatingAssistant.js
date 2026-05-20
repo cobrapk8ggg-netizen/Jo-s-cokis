@@ -558,6 +558,11 @@ public class FloatingAssistantService extends Service {
     ClipboardManager clipboard = (ClipboardManager) getSystemService(CLIPBOARD_SERVICE);
     clipboard.setPrimaryClip(ClipData.newPlainText("CookieTyper", element.optString("text", "")));
     Toast.makeText(this, "تم النسخ", Toast.LENGTH_SHORT).show();
+
+    // الانتقال التلقائي إلى العنصر التالي بعد النسخ
+    if (currentIndex < elements.length() - 1) {
+      goToIndex(currentIndex + 1);
+    }
   }
 
   private void emitIndexChanged() {

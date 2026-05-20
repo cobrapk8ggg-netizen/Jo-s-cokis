@@ -1,4 +1,4 @@
-import React, { useMemo, useRef, useState } from 'react';
+import React, { useMemo, useState } from 'react';
 import {
   Image,
   Modal,
@@ -16,7 +16,8 @@ import {
 } from 'react-native';
 import * as ImagePicker from 'expo-image-picker';
 import * as MediaLibrary from 'expo-media-library';
-import { captureRef } from 'react-native-view-shot';
+import * as FileSystem from 'expo-file-system';
+import { Skia } from '@shopify/react-native-skia';
 import {
   ArrowDown,
   ArrowUp,
@@ -65,16 +66,14 @@ export function ImageMergeScreen({
   const [mergedImageUri, setMergedImageUri] = useState<string | null>(null);
   const [isMerging, setIsMerging] = useState(false);
 
-  const mergeViewRef = useRef<View>(null);
-
-  // Function to perform the actual merge and produce a PNG URI
+  // ------------------ دالة الدمج عبر Skia (بدون تجميد) ------------------
   const performMerge = async (): Promise<string | null> => {
     if (images.length === 0) return null;
 
     setIsMerging(true);
 
     try {
-      // Calculate dimensions
+      // 1. حساب الأبعاد
       let maxWidth = 0;
       for (const img of images) {
         const w = img.width || 1;
@@ -86,11 +85,7 @@ export function ImageMergeScreen({
         const originalHeight = img.height || 1;
         const targetWidth = unifyWidth ? maxWidth : originalWidth;
         const targetHeight = (originalHeight * targetWidth) / originalWidth;
-        return {
-          ...img,
-          targetWidth,
-          targetHeight,
-        };
+        return { ...img, targetWidth, targetHeight };
       });
 
       let totalHeight = 0;
@@ -99,24 +94,51 @@ export function ImageMergeScreen({
         if (i < items.length - 1) totalHeight += GAP;
       }
 
-      // Create a temporary View that will be captured
-      // We place it off-screen but still visible to the capture system.
-      // This view is not part of the main UI, it's only for capturing.
-      // We'll render it conditionally, but captureRef requires it to be mounted.
-      // So we always keep it but with opacity 0 and position absolute.
-      // We need to ensure it's rendered before capture.
-      // Since we are inside a ScrollView, we'll put it outside the ScrollView
-      // but inside the same root view.
+      // 2. إنشاء سطح offscreen (خارج الشاشة) عبر Skia
+      const surface = Skia.Surface.MakeOffscreen(maxWidth, totalHeight);
+      if (!surface) throw new Error('فشل إنشاء سطح الرسم');
+      const canvas = surface.getCanvas();
+      canvas.clear(Skia.Color('black'));
 
-      // We'll capture using the ref after the view is updated.
-      // To be safe we set a small delay.
-      if (!mergeViewRef.current) return null;
+      let currentY = 0;
 
-      const uri = await captureRef(mergeViewRef.current, {
-        format: 'png',
-        quality: 1,
+      // 3. رسم كل صورة على السطح
+      for (let i = 0; i < items.length; i++) {
+        const img = items[i];
+
+        // قراءة ملف الصورة كـ base64 (آمن ومتوافق)
+        const base64 = await FileSystem.readAsStringAsync(img.uri, {
+          encoding: FileSystem.EncodingType.Base64,
+        });
+
+        // تحويل base64 إلى Skia Data ثم إلى صورة
+        const skiaData = Skia.Data.fromBase64(base64);
+        const skiaImage = Skia.Image.MakeImageFromEncoded(skiaData);
+
+        if (skiaImage) {
+          canvas.drawImageRect(
+            skiaImage,
+            { x: 0, y: 0, width: skiaImage.width(), height: skiaImage.height() },
+            {
+              x: 0,
+              y: currentY,
+              width: img.targetWidth,
+              height: img.targetHeight,
+            }
+          );
+          currentY += img.targetHeight + (i < items.length - 1 ? GAP : 0);
+        }
+      }
+
+      // 4. تصدير النتيجة إلى ملف PNG مؤقت
+      const snapshot = surface.makeImageSnapshot();
+      const finalBase64 = snapshot.encodeToBase64();
+      const fileUri = FileSystem.cacheDirectory + `merge_${Date.now()}.png`;
+      await FileSystem.writeAsStringAsync(fileUri, finalBase64, {
+        encoding: FileSystem.EncodingType.Base64,
       });
-      return uri;
+
+      return fileUri;
     } catch (error) {
       console.error('Merge failed', error);
       return null;
@@ -223,64 +245,11 @@ export function ImageMergeScreen({
 
   const galleryTitle = useMemo(() => `المعرض — ${images.length}`, [images.length]);
 
-  // Helper to get status bar height for modal header
   const getStatusBarHeight = () => {
     if (Platform.OS === 'android') {
       return StatusBar.currentHeight || 0;
     }
     return 20;
-  };
-
-  // Build the hidden merge view
-  const renderMergeCaptureView = () => {
-    if (images.length === 0) return null;
-    // Calculate max width and sizes
-    let maxWidth = 0;
-    for (const img of images) {
-      const w = img.width || 1;
-      if (w > maxWidth) maxWidth = w;
-    }
-    const items = images.map((img) => {
-      const originalWidth = img.width || 1;
-      const originalHeight = img.height || 1;
-      const targetWidth = unifyWidth ? maxWidth : originalWidth;
-      const targetHeight = (originalHeight * targetWidth) / originalWidth;
-      return { ...img, targetWidth, targetHeight };
-    });
-    let totalHeight = 0;
-    for (let i = 0; i < items.length; i++) {
-      totalHeight += items[i].targetHeight;
-      if (i < items.length - 1) totalHeight += GAP;
-    }
-
-    return (
-      <View
-        ref={mergeViewRef}
-        style={{
-          position: 'absolute',
-          top: -10000,
-          left: 0,
-          width: maxWidth,
-          height: totalHeight,
-          opacity: 0,
-          backgroundColor: 'black',
-        }}
-        collapsable={false}
-      >
-        <View style={{ flexDirection: 'column', width: maxWidth }}>
-          {items.map((item, idx) => (
-            <View key={item.id}>
-              <Image
-                source={{ uri: item.uri }}
-                style={{ width: item.targetWidth, height: item.targetHeight }}
-                resizeMode="contain"
-              />
-              {idx < items.length - 1 && <View style={{ height: GAP }} />}
-            </View>
-          ))}
-        </View>
-      </View>
-    );
   };
 
   return (
@@ -407,9 +376,6 @@ export function ImageMergeScreen({
         </View>
       </ScrollView>
 
-      {/* Hidden capture view */}
-      {renderMergeCaptureView()}
-
       {/* Real preview modal */}
       <Modal
         visible={previewOpen}
@@ -438,7 +404,7 @@ export function ImageMergeScreen({
                 style={{
                   width: `${previewScale}%`,
                   alignSelf: 'center',
-                  aspectRatio: 1, // will be overridden by actual image dimensions
+                  aspectRatio: 1,
                 }}
                 resizeMode="contain"
               />
