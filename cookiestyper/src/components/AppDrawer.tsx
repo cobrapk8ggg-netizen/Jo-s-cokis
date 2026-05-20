@@ -24,14 +24,19 @@ export const AppDrawer: React.FC<AppDrawerProps> = ({ visible, active, onClose, 
   const anim = React.useRef(new Animated.Value(0)).current;
 
   React.useEffect(() => {
-    Animated.timing(anim, { toValue: visible ? 1 : 0, duration: visible ? 190 : 130, easing: Easing.out(Easing.cubic), useNativeDriver: true }).start();
+    Animated.timing(anim, { 
+      toValue: visible ? 1 : 0, 
+      duration: visible ? 240 : 180, 
+      easing: Easing.out(Easing.bezier(0.16, 1, 0.3, 1)), // حركة احترافية غاية في السلاسة والفخامة البصرية
+      useNativeDriver: true 
+    }).start();
   }, [anim, visible]);
 
   return (
     <Modal visible={visible} transparent animationType="none" onRequestClose={onClose} statusBarTranslucent>
       <Animated.View style={[styles.backdrop, { opacity: anim }]}> 
         <TouchableOpacity activeOpacity={1} style={StyleSheet.absoluteFill} onPress={onClose} />
-        <Animated.View style={[styles.drawer, { transform: [{ translateX: anim.interpolate({ inputRange: [0, 1], outputRange: [320, 0] }) }] }]}> 
+        <Animated.View style={[styles.drawer, { transform: [{ translateX: anim.interpolate({ inputRange: [0, 1], outputRange: [300, 0] }) }] }]}> 
           <View style={styles.drawerHeader}>
             <TouchableOpacity onPress={onClose} style={styles.closeButton}><X color="white" size={20} /></TouchableOpacity>
             <View>
@@ -58,7 +63,21 @@ export const AppDrawer: React.FC<AppDrawerProps> = ({ visible, active, onClose, 
 
 const styles = StyleSheet.create({
   backdrop: { flex: 1, backgroundColor: 'rgba(0,0,0,0.58)', alignItems: 'flex-end', justifyContent: 'center' },
-  drawer: { width: 292, maxWidth: '82%', marginRight: 10, backgroundColor: 'rgba(7,7,12,0.98)', borderRadius: 28, padding: 16, borderWidth: 1.5, borderColor: 'rgba(242,166,184,0.18)' },
+  drawer: { 
+    width: 300, 
+    height: '100%', 
+    marginRight: 0, 
+    backgroundColor: 'rgba(7,7,12,0.98)', 
+    borderTopLeftRadius: 28, 
+    borderBottomLeftRadius: 28, 
+    borderTopRightRadius: 0,
+    borderBottomRightRadius: 0,
+    padding: 16, 
+    paddingTop: 56, // مساحة علوية آمنة واحترافية ممتازة لشريط الحالة الشفاف المتداخل
+    borderWidth: 0,
+    borderLeftWidth: 1.5, 
+    borderColor: 'rgba(242,166,184,0.18)' 
+  },
   drawerHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 18 },
   closeButton: { width: 38, height: 38, borderRadius: 14, backgroundColor: 'rgba(255,255,255,0.07)', alignItems: 'center', justifyContent: 'center' },
   drawerTitle: { color: 'white', fontSize: 20, fontWeight: '900', textAlign: 'right' },
