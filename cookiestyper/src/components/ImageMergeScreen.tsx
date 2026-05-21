@@ -3,7 +3,6 @@ import {
   ActivityIndicator,
   Alert,
   Animated,
-  Linking,
   Platform,
   SafeAreaView,
   StatusBar,
@@ -13,21 +12,12 @@ import {
   View,
 } from 'react-native';
 import { WebView } from 'react-native-webview';
-import type { WebViewMessageEvent, WebViewNavigation } from 'react-native-webview';
+import type { WebViewMessageEvent } from 'react-native-webview';
 import * as FileSystem from 'expo-file-system/legacy';
-import * as MediaLibrary from 'expo-media-library';
-import {
-  ArrowLeft,
-  ArrowRight,
-  Download,
-  Home,
-  RefreshCw,
-} from 'lucide-react-native';
+import * as Sharing from 'expo-sharing';
 
 const COOKIES_PINK = '#F2A6B8';
-const COOKIES_PINK_DARK = '#C96F86';
 const TEXT_SECONDARY = 'rgba(255,255,255,0.7)';
-const TEXT_HINT = 'rgba(255,255,255,0.38)';
 
 // رابط موقع الدمج
 const WEBSITE_URL = 'https://imge-indol.vercel.app';
@@ -45,21 +35,18 @@ export function ImageMergeScreen({
 }) {
   const webViewRef = useRef<WebView>(null);
 
-  const [canGoBack, setCanGoBack] = useState(false);
-  const [canGoForward, setCanGoForward] = useState(false);
-  const [currentUrl, setCurrentUrl] = useState(WEBSITE_URL);
   const [isLoading, setIsLoading] = useState(true);
-  const [isSaving, setIsSaving] = useState(false);
+  const [isPreparingFile, setIsPreparingFile] = useState(false);
 
   // أنميشن للواجهة
   const fadeAnim = useRef(new Animated.Value(0)).current;
-  const slideAnim = useRef(new Animated.Value(20)).current;
+  const slideAnim = useRef(new Animated.Value(12)).current;
 
   useEffect(() => {
     Animated.parallel([
       Animated.timing(fadeAnim, {
         toValue: 1,
-        duration: 500,
+        duration: 400,
         useNativeDriver: true,
       }),
       Animated.spring(slideAnim, {
@@ -106,26 +93,37 @@ export function ImageMergeScreen({
     return 'png';
   };
 
-  const guessExtensionFromUrl = (url: string) => {
-    const cleanUrl = url.split('?')[0].split('#')[0].toLowerCase();
+  const getMimeTypeFromExtension = (extension: string) => {
+    const cleanExtension = extension.toLowerCase();
 
-    if (cleanUrl.endsWith('.jpg') || cleanUrl.endsWith('.jpeg')) return 'jpg';
-    if (cleanUrl.endsWith('.png')) return 'png';
-    if (cleanUrl.endsWith('.webp')) return 'webp';
-    if (cleanUrl.endsWith('.gif')) return 'gif';
+    if (cleanExtension === 'jpg' || cleanExtension === 'jpeg') return 'image/jpeg';
+    if (cleanExtension === 'png') return 'image/png';
+    if (cleanExtension === 'webp') return 'image/webp';
+    if (cleanExtension === 'gif') return 'image/gif';
 
-    return 'png';
+    return 'image/png';
   };
 
-  const requestSavePermission = async () => {
-    const permission = await MediaLibrary.requestPermissionsAsync(true);
+  const getUtiFromExtension = (extension: string) => {
+    const cleanExtension = extension.toLowerCase();
 
-    if (!permission.granted) {
-      throw new Error('مطلوب إذن الوصول إلى الصور لحفظ النتيجة.');
-    }
+    if (cleanExtension === 'jpg' || cleanExtension === 'jpeg') return 'public.jpeg';
+    if (cleanExtension === 'png') return 'public.png';
+    if (cleanExtension === 'webp') return 'org.webmproject.webp';
+    if (cleanExtension === 'gif') return 'com.compuserve.gif';
+
+    return 'public.png';
   };
 
-  const saveLocalImageToLibrary = async (localUri: string) => {
+  const openFilePickerForSaving = async ({
+    localUri,
+    mimeType,
+    extension,
+  }: {
+    localUri: string;
+    mimeType: string;
+    extension: string;
+  }) => {
     const fileInfo = await FileSystem.getInfoAsync(localUri, {
       size: true,
     });
@@ -138,25 +136,20 @@ export function ImageMergeScreen({
       throw new Error('ملف الصورة موجود لكنه فارغ.');
     }
 
-    await requestSavePermission();
+    const sharingAvailable = await Sharing.isAvailableAsync();
 
-    try {
-      await MediaLibrary.saveToLibraryAsync(localUri);
-    } catch (saveError) {
-      console.error('saveToLibraryAsync failed, trying createAssetAsync:', saveError);
-
-      const asset = await MediaLibrary.createAssetAsync(localUri);
-      const album = await MediaLibrary.getAlbumAsync('CookieTyper');
-
-      if (album) {
-        await MediaLibrary.addAssetsToAlbumAsync([asset], album, false);
-      } else {
-        await MediaLibrary.createAlbumAsync('CookieTyper', asset, false);
-      }
+    if (!sharingAvailable) {
+      throw new Error('المشاركة غير متاحة على هذا الجهاز.');
     }
+
+    await Sharing.shareAsync(localUri, {
+      mimeType,
+      UTI: getUtiFromExtension(extension),
+      dialogTitle: 'حفظ الصورة الناتجة',
+    });
   };
 
-  const saveBase64Image = async ({
+  const saveBase64ImageToFiles = async ({
     base64,
     mimeType,
     fileName,
@@ -165,10 +158,12 @@ export function ImageMergeScreen({
     mimeType?: string | null;
     fileName?: string | null;
   }) => {
-    setIsSaving(true);
+    setIsPreparingFile(true);
 
     try {
       const extension = guessExtensionFromMime(mimeType);
+      const finalMimeType = mimeType || getMimeTypeFromExtension(extension);
+
       const safeName = sanitizeFileName(
         fileName || `merged_${Date.now()}.${extension}`
       );
@@ -183,83 +178,33 @@ export function ImageMergeScreen({
         encoding: FileSystem.EncodingType.Base64,
       });
 
-      await saveLocalImageToLibrary(localUri);
+      await openFilePickerForSaving({
+        localUri,
+        mimeType: finalMimeType,
+        extension,
+      });
 
       onAddOperation({
         tool: 'دمج الصور',
-        description: `تم حفظ الصورة الناتجة من الموقع باسم ${finalName}.`,
+        description: `تم تجهيز الصورة الناتجة من الموقع باسم ${finalName} وفتح نافذة الحفظ.`,
       });
-
-      Alert.alert('تم الحفظ', 'تم حفظ الصورة في الاستوديو بنجاح.');
     } catch (error) {
       console.error('Save base64 image failed:', error);
-      Alert.alert('فشل الحفظ', getErrorMessage(error));
+      Alert.alert('فشل تجهيز الملف', getErrorMessage(error));
     } finally {
-      setIsSaving(false);
+      setIsPreparingFile(false);
     }
   };
 
-  const saveImageFromUrl = async ({
-    url,
-    fileName,
-  }: {
-    url: string;
-    fileName?: string | null;
-  }) => {
-    setIsSaving(true);
-
-    try {
-      const extension = guessExtensionFromUrl(url);
-      const safeName = sanitizeFileName(
-        fileName || `merged_${Date.now()}.${extension}`
-      );
-
-      const finalName = safeName.toLowerCase().endsWith(`.${extension}`)
-        ? safeName
-        : `${safeName}.${extension}`;
-
-      const localUri = `${FileSystem.cacheDirectory}${finalName}`;
-
-      const downloaded = await FileSystem.downloadAsync(
-        url,
-        localUri,
-        {
-          headers: {
-            Accept: 'image/png,image/jpeg,image/webp,image/*,*/*',
-            'Cache-Control': 'no-cache',
-          },
-        }
-      );
-
-      if (downloaded.status !== 200) {
-        throw new Error(`فشل تحميل الصورة. كود الخطأ: ${downloaded.status}`);
-      }
-
-      await saveLocalImageToLibrary(downloaded.uri);
-
-      onAddOperation({
-        tool: 'دمج الصور',
-        description: `تم حفظ الصورة الناتجة من الموقع باسم ${finalName}.`,
-      });
-
-      Alert.alert('تم الحفظ', 'تم حفظ الصورة في الاستوديو بنجاح.');
-    } catch (error) {
-      console.error('Save image from URL failed:', error);
-      Alert.alert('فشل الحفظ', getErrorMessage(error));
-    } finally {
-      setIsSaving(false);
-    }
-  };
-
-  const injectedDownloadBridge = useMemo(() => {
+  const injectedAppBridge = useMemo(() => {
     return `
       (function () {
-        if (window.__COOKIE_TYPER_DOWNLOAD_BRIDGE_INSTALLED__) {
+        if (window.__COOKIE_TYPER_APP_BRIDGE_INSTALLED__) {
           true;
           return;
         }
 
-        window.__COOKIE_TYPER_DOWNLOAD_BRIDGE_INSTALLED__ = true;
+        window.__COOKIE_TYPER_APP_BRIDGE_INSTALLED__ = true;
 
         function postToApp(payload) {
           try {
@@ -272,164 +217,256 @@ export function ImageMergeScreen({
           }
         }
 
-        function getFileNameFromUrl(url) {
+        function getCleanFileName(name) {
           try {
-            var clean = String(url || '').split('?')[0].split('#')[0];
-            var parts = clean.split('/');
-            var last = parts[parts.length - 1];
-            return last || ('merged_' + Date.now() + '.png');
+            var value = String(name || '').trim();
+            if (!value) return 'merged_' + Date.now() + '.png';
+            value = value.replace(/\\s+/g, '_');
+            if (!value.toLowerCase().endsWith('.png')) value = value + '.png';
+            return value;
           } catch (error) {
             return 'merged_' + Date.now() + '.png';
           }
         }
 
-        function isProbablyImageUrl(url) {
-          if (!url) return false;
-          var clean = String(url).split('?')[0].split('#')[0].toLowerCase();
-          return (
-            clean.endsWith('.png') ||
-            clean.endsWith('.jpg') ||
-            clean.endsWith('.jpeg') ||
-            clean.endsWith('.webp') ||
-            clean.endsWith('.gif')
-          );
-        }
-
         function dataUrlToPayload(dataUrl, fileName) {
           try {
-            var match = String(dataUrl).match(/^data:([^;]+);base64,(.*)$/);
+            var match = String(dataUrl || '').match(/^data:([^;]+);base64,(.*)$/);
+
             if (!match) {
               postToApp({
                 type: 'DOWNLOAD_ERROR',
-                message: 'صيغة data URL غير مدعومة'
+                message: 'لم يتم العثور على صورة جاهزة للحفظ. قم بالدمج أولاً.'
               });
-              return;
+              return false;
             }
 
             postToApp({
               type: 'DOWNLOAD_BASE64',
               mimeType: match[1],
               base64: match[2],
-              fileName: fileName || ('merged_' + Date.now() + '.png')
+              fileName: getCleanFileName(fileName)
             });
+
+            return true;
           } catch (error) {
             postToApp({
               type: 'DOWNLOAD_ERROR',
               message: error && error.message ? error.message : String(error)
             });
+            return false;
           }
         }
 
-        async function blobUrlToPayload(blobUrl, fileName) {
-          try {
-            var response = await fetch(blobUrl);
-            var blob = await response.blob();
+        function getResultImageDataUrl() {
+          var image = document.getElementById('resultImage');
 
-            var reader = new FileReader();
+          if (image && image.src && String(image.src).startsWith('data:image')) {
+            return image.src;
+          }
 
-            reader.onloadend = function () {
-              try {
-                dataUrlToPayload(
-                  reader.result,
-                  fileName || ('merged_' + Date.now() + '.png')
-                );
-              } catch (error) {
-                postToApp({
-                  type: 'DOWNLOAD_ERROR',
-                  message: error && error.message ? error.message : String(error)
-                });
-              }
-            };
+          return null;
+        }
 
-            reader.onerror = function () {
-              postToApp({
-                type: 'DOWNLOAD_ERROR',
-                message: 'فشل قراءة ملف الصورة من داخل WebView'
-              });
-            };
+        function getOutputFileName() {
+          var outputNameInput = document.getElementById('outputNameInput');
 
-            reader.readAsDataURL(blob);
-          } catch (error) {
+          if (outputNameInput && outputNameInput.value && outputNameInput.value.trim()) {
+            return outputNameInput.value.trim().replace(/\\s+/g, '_') + '.png';
+          }
+
+          return 'merged_' + Date.now() + '.png';
+        }
+
+        function triggerNativeSaveFromCurrentResult() {
+          var dataUrl = getResultImageDataUrl();
+
+          if (!dataUrl) {
             postToApp({
               type: 'DOWNLOAD_ERROR',
-              message: error && error.message ? error.message : String(error)
+              message: 'لا توجد صورة جاهزة للحفظ. اضغط ابدأ الدمج أولاً.'
             });
+            return false;
           }
+
+          return dataUrlToPayload(dataUrl, getOutputFileName());
         }
 
-        document.addEventListener('click', function (event) {
-          var target = event.target;
-
-          while (target && target.tagName && target.tagName.toLowerCase() !== 'a') {
-            target = target.parentElement;
-          }
-
-          if (!target || !target.href) {
+        function createNativePreviewOverlay() {
+          if (document.getElementById('cookieTyperNativePreviewOverlay')) {
             return;
           }
 
-          var href = target.href;
-          var downloadName = target.getAttribute('download') || getFileNameFromUrl(href);
-          var hasDownloadAttribute = target.hasAttribute('download');
+          var overlay = document.createElement('div');
+          overlay.id = 'cookieTyperNativePreviewOverlay';
+          overlay.style.position = 'fixed';
+          overlay.style.left = '0';
+          overlay.style.top = '0';
+          overlay.style.right = '0';
+          overlay.style.bottom = '0';
+          overlay.style.zIndex = '999999';
+          overlay.style.background = '#050505';
+          overlay.style.display = 'none';
+          overlay.style.flexDirection = 'column';
 
-          if (String(href).startsWith('blob:')) {
+          overlay.innerHTML = ''
+            + '<div style="height:64px;display:flex;flex-direction:row-reverse;align-items:center;justify-content:space-between;padding:12px 16px;background:rgba(15,15,15,0.92);border-bottom:1px solid rgba(255,255,255,0.08);">'
+            + '  <button id="cookieTyperClosePreview" style="width:40px;height:40px;border-radius:20px;border:0;background:rgba(255,255,255,0.1);color:white;font-size:24px;font-weight:900;">‹</button>'
+            + '  <div style="color:white;font-weight:900;font-size:18px;">معاينة حقيقية للمخرج</div>'
+            + '  <button id="cookieTyperPreviewScale" style="width:40px;height:40px;border-radius:20px;border:0;background:rgba(255,255,255,0.1);color:white;font-size:18px;font-weight:900;">100</button>'
+            + '</div>'
+            + '<div id="cookieTyperPreviewScroll" style="flex:1;overflow:auto;-webkit-overflow-scrolling:touch;">'
+            + '  <img id="cookieTyperPreviewImage" src="" style="display:block;width:100vw;max-width:none;height:auto;margin:0 auto;" />'
+            + '</div>';
+
+          document.body.appendChild(overlay);
+
+          var currentScale = 100;
+          var scales = [50, 70, 80, 100];
+          var scaleIndex = 3;
+
+          function applyScale() {
+            var image = document.getElementById('cookieTyperPreviewImage');
+            var scaleButton = document.getElementById('cookieTyperPreviewScale');
+            var viewportWidth = window.visualViewport && window.visualViewport.width ? window.visualViewport.width : window.innerWidth;
+
+            if (image) {
+              image.style.width = ((viewportWidth * currentScale) / 100) + 'px';
+            }
+
+            if (scaleButton) {
+              scaleButton.textContent = String(currentScale);
+            }
+          }
+
+          document.getElementById('cookieTyperClosePreview').addEventListener('click', function () {
+            overlay.style.display = 'none';
+          });
+
+          document.getElementById('cookieTyperPreviewScale').addEventListener('click', function () {
+            scaleIndex = (scaleIndex + 1) % scales.length;
+            currentScale = scales[scaleIndex];
+            applyScale();
+          });
+
+          window.addEventListener('resize', applyScale);
+
+          window.CookieTyperOpenNativePreview = function () {
+            var dataUrl = getResultImageDataUrl();
+
+            if (!dataUrl) {
+              postToApp({
+                type: 'DOWNLOAD_ERROR',
+                message: 'لا توجد صورة جاهزة للمعاينة. اضغط ابدأ الدمج أولاً.'
+              });
+              return false;
+            }
+
+            var image = document.getElementById('cookieTyperPreviewImage');
+            image.src = dataUrl;
+            overlay.style.display = 'flex';
+            currentScale = 100;
+            scaleIndex = 3;
+            setTimeout(applyScale, 50);
+            return true;
+          };
+        }
+
+        createNativePreviewOverlay();
+
+        document.addEventListener('click', function (event) {
+          var saveButton = event.target && event.target.closest ? event.target.closest('#saveBtn') : null;
+
+          if (saveButton) {
             event.preventDefault();
             event.stopPropagation();
-            blobUrlToPayload(href, downloadName);
+            if (event.stopImmediatePropagation) event.stopImmediatePropagation();
+            triggerNativeSaveFromCurrentResult();
             return false;
           }
 
-          if (String(href).startsWith('data:image')) {
+          var previewButton = event.target && event.target.closest ? event.target.closest('#previewToggleBtn') : null;
+
+          if (previewButton) {
             event.preventDefault();
             event.stopPropagation();
-            dataUrlToPayload(href, downloadName);
+            if (event.stopImmediatePropagation) event.stopImmediatePropagation();
+
+            if (window.CookieTyperOpenNativePreview) {
+              window.CookieTyperOpenNativePreview();
+            }
+
             return false;
           }
 
-          if (hasDownloadAttribute || isProbablyImageUrl(href)) {
+          var link = event.target && event.target.closest ? event.target.closest('a') : null;
+
+          if (link && link.href && String(link.href).startsWith('data:image')) {
             event.preventDefault();
             event.stopPropagation();
-
-            postToApp({
-              type: 'DOWNLOAD_URL',
-              url: href,
-              fileName: downloadName
-            });
-
+            if (event.stopImmediatePropagation) event.stopImmediatePropagation();
+            dataUrlToPayload(link.href, link.getAttribute('download') || getOutputFileName());
             return false;
           }
         }, true);
 
-        var originalCreateObjectURL = URL.createObjectURL;
+        var originalCreateElement = document.createElement.bind(document);
 
-        URL.createObjectURL = function (object) {
-          var objectUrl = originalCreateObjectURL.call(URL, object);
+        document.createElement = function (tagName) {
+          var element = originalCreateElement(tagName);
 
           try {
-            if (object && object.type && String(object.type).startsWith('image/')) {
-              window.__COOKIE_TYPER_LAST_IMAGE_BLOB_URL__ = objectUrl;
+            if (String(tagName).toLowerCase() === 'a') {
+              var originalClick = element.click ? element.click.bind(element) : null;
+
+              element.click = function () {
+                try {
+                  if (element.href && String(element.href).startsWith('data:image')) {
+                    dataUrlToPayload(element.href, element.getAttribute('download') || getOutputFileName());
+                    return;
+                  }
+                } catch (error) {}
+
+                if (originalClick) {
+                  return originalClick();
+                }
+              };
             }
           } catch (error) {}
 
-          return objectUrl;
+          return element;
         };
 
-        window.CookieTyperSaveLastImage = function () {
-          if (window.__COOKIE_TYPER_LAST_IMAGE_BLOB_URL__) {
-            blobUrlToPayload(
-              window.__COOKIE_TYPER_LAST_IMAGE_BLOB_URL__,
-              'merged_' + Date.now() + '.png'
-            );
-            return true;
+        window.open = function () {
+          if (window.CookieTyperOpenNativePreview) {
+            window.CookieTyperOpenNativePreview();
           }
 
-          postToApp({
-            type: 'DOWNLOAD_ERROR',
-            message: 'لا توجد صورة جاهزة محفوظة داخل الموقع بعد.'
-          });
+          return {
+            closed: false,
+            addEventListener: function (eventName, callback) {
+              if (eventName === 'load' && typeof callback === 'function') {
+                setTimeout(callback, 0);
+              }
+            },
+            postMessage: function (message) {
+              try {
+                if (message && message.type === 'mergedImage' && message.dataURL) {
+                  var overlay = document.getElementById('cookieTyperNativePreviewOverlay');
+                  var image = document.getElementById('cookieTyperPreviewImage');
 
-          return false;
+                  if (overlay && image) {
+                    image.src = message.dataURL;
+                    overlay.style.display = 'flex';
+                  }
+                }
+              } catch (error) {}
+            },
+            close: function () {}
+          };
         };
+
+        window.CookieTyperSaveCurrentResultToFiles = triggerNativeSaveFromCurrentResult;
 
         true;
       })();
@@ -442,7 +479,7 @@ export function ImageMergeScreen({
       const data = JSON.parse(raw);
 
       if (data?.type === 'DOWNLOAD_BASE64') {
-        await saveBase64Image({
+        await saveBase64ImageToFiles({
           base64: data.base64,
           mimeType: data.mimeType,
           fileName: data.fileName,
@@ -450,124 +487,14 @@ export function ImageMergeScreen({
         return;
       }
 
-      if (data?.type === 'DOWNLOAD_URL') {
-        await saveImageFromUrl({
-          url: data.url,
-          fileName: data.fileName,
-        });
-        return;
-      }
-
       if (data?.type === 'DOWNLOAD_ERROR') {
-        Alert.alert('فشل الحفظ', data.message || 'حدث خطأ أثناء محاولة حفظ الصورة.');
+        Alert.alert('تنبيه', data.message || 'حدث خطأ أثناء محاولة تجهيز الصورة.');
         return;
       }
     } catch (error) {
       console.error('WebView message parse failed:', error);
     }
   };
-
-  const onNavigationStateChange = (navState: WebViewNavigation) => {
-    setCanGoBack(navState.canGoBack);
-    setCanGoForward(navState.canGoForward);
-    setCurrentUrl(navState.url);
-  };
-
-  const shouldStartLoad = (request: any) => {
-    const url = request?.url || '';
-
-    if (!url) return true;
-
-    if (
-      url.startsWith('about:blank') ||
-      url.startsWith('https://imge-indol.vercel.app') ||
-      url.startsWith('http://imge-indol.vercel.app')
-    ) {
-      return true;
-    }
-
-    if (
-      url.startsWith('blob:') ||
-      url.startsWith('data:image')
-    ) {
-      return false;
-    }
-
-    const cleanUrl = url.split('?')[0].split('#')[0].toLowerCase();
-
-    if (
-      cleanUrl.endsWith('.png') ||
-      cleanUrl.endsWith('.jpg') ||
-      cleanUrl.endsWith('.jpeg') ||
-      cleanUrl.endsWith('.webp') ||
-      cleanUrl.endsWith('.gif')
-    ) {
-      saveImageFromUrl({
-        url,
-        fileName: cleanUrl.split('/').pop() || null,
-      });
-      return false;
-    }
-
-    if (
-      url.startsWith('mailto:') ||
-      url.startsWith('tel:') ||
-      url.startsWith('whatsapp:') ||
-      url.startsWith('tg:')
-    ) {
-      Linking.openURL(url).catch((error) => {
-        console.error('Open external URL failed:', error);
-      });
-      return false;
-    }
-
-    return true;
-  };
-
-  const goHome = () => {
-    webViewRef.current?.injectJavaScript(`
-      window.location.href = '${WEBSITE_URL}';
-      true;
-    `);
-  };
-
-  const goBack = () => {
-    if (canGoBack) {
-      webViewRef.current?.goBack();
-    }
-  };
-
-  const goForward = () => {
-    if (canGoForward) {
-      webViewRef.current?.goForward();
-    }
-  };
-
-  const reload = () => {
-    webViewRef.current?.reload();
-  };
-
-  const trySaveFromWebsite = () => {
-    webViewRef.current?.injectJavaScript(`
-      if (window.CookieTyperSaveLastImage) {
-        window.CookieTyperSaveLastImage();
-      } else {
-        window.ReactNativeWebView.postMessage(JSON.stringify({
-          type: 'DOWNLOAD_ERROR',
-          message: 'لم يتم العثور على صورة جاهزة للحفظ داخل الموقع.'
-        }));
-      }
-      true;
-    `);
-  };
-
-  const pageSubtitle = useMemo(() => {
-    if (currentUrl.includes('imge-indol.vercel.app')) {
-      return 'أداة دمج الصور';
-    }
-
-    return currentUrl;
-  }, [currentUrl]);
 
   return (
     <SafeAreaView style={styles.safe}>
@@ -585,55 +512,12 @@ export function ImageMergeScreen({
         <View
           style={[
             styles.fixedHeader,
-            { paddingTop: getStatusBarHeight() + 8 },
+            { paddingTop: getStatusBarHeight() + 4 },
           ]}
         >
-          <View style={styles.topRow}>
-            <TouchableOpacity onPress={onOpenMenu} style={styles.menuBtn}>
-              <Text style={styles.menuText}>☰</Text>
-            </TouchableOpacity>
-
-            <View style={styles.headerTitleContainer}>
-              <View>
-                <Text style={styles.pageTitle}>دمج الصور</Text>
-                <Text numberOfLines={1} style={styles.pageSubtitle}>
-                  {pageSubtitle}
-                </Text>
-              </View>
-              <View style={styles.titleBadge} />
-            </View>
-          </View>
-
-          <View style={styles.browserBar}>
-            <TouchableOpacity
-              onPress={goBack}
-              disabled={!canGoBack}
-              style={[styles.browserBtn, { opacity: canGoBack ? 1 : 0.35 }]}
-            >
-              <ArrowRight color="white" size={18} />
-            </TouchableOpacity>
-
-            <TouchableOpacity
-              onPress={goForward}
-              disabled={!canGoForward}
-              style={[styles.browserBtn, { opacity: canGoForward ? 1 : 0.35 }]}
-            >
-              <ArrowLeft color="white" size={18} />
-            </TouchableOpacity>
-
-            <TouchableOpacity onPress={goHome} style={styles.browserBtn}>
-              <Home color="white" size={18} />
-            </TouchableOpacity>
-
-            <TouchableOpacity onPress={reload} style={styles.browserBtn}>
-              <RefreshCw color="white" size={18} />
-            </TouchableOpacity>
-
-            <TouchableOpacity onPress={trySaveFromWebsite} style={styles.downloadBtn}>
-              <Download color="white" size={18} />
-              <Text style={styles.downloadBtnText}>حفظ</Text>
-            </TouchableOpacity>
-          </View>
+          <TouchableOpacity onPress={onOpenMenu} style={styles.menuBtn}>
+            <Text style={styles.menuText}>☰</Text>
+          </TouchableOpacity>
         </View>
 
         <View style={styles.webContainer}>
@@ -647,21 +531,19 @@ export function ImageMergeScreen({
             sharedCookiesEnabled
             thirdPartyCookiesEnabled
             startInLoadingState
-            allowsBackForwardNavigationGestures
+            allowsBackForwardNavigationGestures={false}
             setSupportMultipleWindows={false}
             mixedContentMode="always"
             allowsInlineMediaPlayback
             allowFileAccess
             allowUniversalAccessFromFileURLs
-            injectedJavaScript={injectedDownloadBridge}
-            injectedJavaScriptBeforeContentLoaded={injectedDownloadBridge}
+            injectedJavaScript={injectedAppBridge}
+            injectedJavaScriptBeforeContentLoaded={injectedAppBridge}
             onMessage={onMessage}
-            onNavigationStateChange={onNavigationStateChange}
-            onShouldStartLoadWithRequest={shouldStartLoad}
             onLoadStart={() => setIsLoading(true)}
             onLoadEnd={() => {
               setIsLoading(false);
-              webViewRef.current?.injectJavaScript(injectedDownloadBridge);
+              webViewRef.current?.injectJavaScript(injectedAppBridge);
             }}
             onError={(event) => {
               console.error('WebView error:', event.nativeEvent);
@@ -670,27 +552,17 @@ export function ImageMergeScreen({
             onHttpError={(event) => {
               console.error('WebView HTTP error:', event.nativeEvent);
             }}
-            onFileDownload={(event) => {
-              const downloadUrl = event.nativeEvent.downloadUrl;
-
-              if (downloadUrl) {
-                saveImageFromUrl({
-                  url: downloadUrl,
-                  fileName: null,
-                });
-              }
-            }}
           />
 
-          {(isLoading || isSaving) && (
+          {(isLoading || isPreparingFile) && (
             <View style={styles.loadingOverlay}>
               <View style={styles.loadingBox}>
                 <ActivityIndicator size="large" color={COOKIES_PINK} />
                 <Text style={styles.loadingText}>
-                  {isSaving ? 'جاري حفظ الصورة...' : 'جاري تحميل أداة الدمج...'}
+                  {isPreparingFile ? 'جاري تجهيز ملف الصورة...' : 'جاري فتح الأداة...'}
                 </Text>
                 <Text style={styles.loadingSubText}>
-                  {isSaving ? 'يرجى الانتظار حتى يكتمل الحفظ' : 'يتم فتح الموقع داخل التطبيق'}
+                  {isPreparingFile ? 'سيتم فتح نافذة الحفظ بعد لحظات' : 'يرجى الانتظار'}
                 </Text>
               </View>
             </View>
@@ -713,22 +585,18 @@ const styles = StyleSheet.create({
   fixedHeader: {
     backgroundColor: 'rgba(10,10,10,0.98)',
     borderBottomWidth: 1,
-    borderBottomColor: 'rgba(255,255,255,0.08)',
-    paddingHorizontal: 16,
-    paddingBottom: 12,
+    borderBottomColor: 'rgba(255,255,255,0.06)',
+    paddingHorizontal: 10,
+    paddingBottom: 6,
+    alignItems: 'flex-end',
+    justifyContent: 'center',
     zIndex: 10,
-  },
-  topRow: {
-    flexDirection: 'row-reverse',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: 12,
   },
   menuBtn: {
     backgroundColor: 'rgba(255,255,255,0.06)',
-    borderRadius: 16,
-    paddingHorizontal: 16,
-    paddingVertical: 10,
+    borderRadius: 14,
+    paddingHorizontal: 14,
+    paddingVertical: 8,
     borderWidth: 1,
     borderColor: 'rgba(255,255,255,0.1)',
   },
@@ -736,72 +604,6 @@ const styles = StyleSheet.create({
     color: 'white',
     fontSize: 18,
     fontWeight: '700',
-  },
-  headerTitleContainer: {
-    flexDirection: 'row-reverse',
-    alignItems: 'center',
-    gap: 8,
-    flex: 1,
-    marginLeft: 12,
-  },
-  pageTitle: {
-    color: 'white',
-    fontWeight: '900',
-    fontSize: 24,
-    letterSpacing: 0.5,
-    textAlign: 'right',
-  },
-  pageSubtitle: {
-    color: TEXT_HINT,
-    fontWeight: '700',
-    fontSize: 12,
-    marginTop: 2,
-    textAlign: 'right',
-    maxWidth: 240,
-  },
-  titleBadge: {
-    width: 8,
-    height: 8,
-    borderRadius: 4,
-    backgroundColor: COOKIES_PINK,
-    shadowColor: COOKIES_PINK,
-    shadowOffset: { width: 0, height: 0 },
-    shadowOpacity: 0.8,
-    shadowRadius: 6,
-    elevation: 4,
-  },
-  browserBar: {
-    flexDirection: 'row-reverse',
-    alignItems: 'center',
-    gap: 8,
-  },
-  browserBtn: {
-    width: 42,
-    height: 38,
-    borderRadius: 14,
-    backgroundColor: 'rgba(255,255,255,0.06)',
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.08)',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  downloadBtn: {
-    flexDirection: 'row-reverse',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 6,
-    height: 38,
-    paddingHorizontal: 14,
-    borderRadius: 14,
-    backgroundColor: COOKIES_PINK_DARK,
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.12)',
-    marginRight: 'auto',
-  },
-  downloadBtnText: {
-    color: 'white',
-    fontWeight: '900',
-    fontSize: 14,
   },
   webContainer: {
     flex: 1,
