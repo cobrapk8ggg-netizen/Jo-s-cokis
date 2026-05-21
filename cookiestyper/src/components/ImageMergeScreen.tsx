@@ -88,6 +88,89 @@ export function ImageMergeScreen({
     ]).start();
   }, [fadeAnim, slideAnim]);
 
+  const getErrorMessage = (error: any) => {
+    return (
+      error?.message ||
+      error?.toString?.() ||
+      'خطأ غير معروف'
+    );
+  };
+
+  const downloadResultToLocalFile = async (resultUrl: string): Promise<string | null> => {
+    try {
+      const baseDirectory = FileSystem.documentDirectory || FileSystem.cacheDirectory;
+
+      if (!baseDirectory) {
+        console.error('No local directory available for saving merged image.');
+        return null;
+      }
+
+      const localFileName = `merged_result_${Date.now()}.png`;
+      const localFileUri = baseDirectory + localFileName;
+
+      const downloaded = await FileSystem.downloadAsync(
+        resultUrl,
+        localFileUri,
+        {
+          headers: {
+            Accept: 'image/png,image/*,*/*',
+            'Cache-Control': 'no-cache',
+          },
+        }
+      );
+
+      if (downloaded.status !== 200) {
+        console.error('Result download failed:', downloaded.status, downloaded);
+        return null;
+      }
+
+      const fileInfo = await FileSystem.getInfoAsync(downloaded.uri, {
+        size: true,
+      });
+
+      if (!fileInfo.exists) {
+        console.error('Downloaded merged file does not exist:', downloaded.uri);
+        return null;
+      }
+
+      return downloaded.uri;
+    } catch (error) {
+      console.error('Download merged result failed:', error);
+      return null;
+    }
+  };
+
+  const saveLocalImageToDevice = async (localUri: string) => {
+    const fileInfo = await FileSystem.getInfoAsync(localUri, {
+      size: true,
+    });
+
+    if (!fileInfo.exists) {
+      throw new Error('ملف الصورة غير موجود داخل التطبيق.');
+    }
+
+    const permission = await MediaLibrary.requestPermissionsAsync(false);
+
+    if (!permission.granted) {
+      throw new Error('مطلوب إذن الوصول إلى المكتبة لحفظ الصورة.');
+    }
+
+    try {
+      await MediaLibrary.saveToLibraryAsync(localUri);
+    } catch (saveError) {
+      console.error('saveToLibraryAsync failed, trying createAssetAsync:', saveError);
+
+      const asset = await MediaLibrary.createAssetAsync(localUri);
+      const album = await MediaLibrary.getAlbumAsync('CookieTyper');
+
+      if (album) {
+        await MediaLibrary.addAssetsToAlbumAsync([asset], album, false);
+      } else {
+        await MediaLibrary.createAlbumAsync('CookieTyper', asset, false);
+      }
+    }
+  };
+
   // دالة رفع الصور للخادم والدمج
   const uploadAndMerge = async (): Promise<string | null> => {
     if (images.length === 0) return null;
@@ -127,11 +210,19 @@ export function ImageMergeScreen({
       const data = JSON.parse(responseText);
 
       if (!data?.url) {
-        console.error('No Cloudinary URL returned:', data);
+        console.error('No result URL returned:', data);
         return null;
       }
 
-      return data.url;
+      // تحميل الصورة الناتجة فورًا من الرابط إلى ملف محلي داخل الجهاز
+      const localUri = await downloadResultToLocalFile(data.url);
+
+      if (!localUri) {
+        console.error('Failed to download result image to local file.');
+        return null;
+      }
+
+      return localUri;
     } catch (error) {
       console.error('Merge upload failed', error);
       return null;
@@ -146,10 +237,26 @@ export function ImageMergeScreen({
     if (uri) {
       setMergedImageUri(uri);
       setResultReady(true);
-      onAddOperation({
-        tool: 'دمج الصور',
-        description: `تم توليد ناتج دمج عمودي لـ ${images.length} صور بجودة أصلية.`,
-      });
+
+      try {
+        await saveLocalImageToDevice(uri);
+
+        onAddOperation({
+          tool: 'دمج الصور',
+          description: `تم توليد ناتج دمج عمودي لـ ${images.length} صور بجودة أصلية وحفظه تلقائيًا في الجهاز.`,
+        });
+
+        alert('تم الدمج وحفظ الصورة تلقائيًا في الاستوديو بنجاح!');
+      } catch (error) {
+        console.error('Auto save failed:', error);
+
+        onAddOperation({
+          tool: 'دمج الصور',
+          description: `تم توليد ناتج دمج عمودي لـ ${images.length} صور بجودة أصلية.`,
+        });
+
+        alert(`تم الدمج بنجاح، لكن فشل الحفظ التلقائي: ${getErrorMessage(error)}`);
+      }
     } else {
       alert('فشل الدمج على الخادم، تأكد من اتصالك بالإنترنت ومن أن الخادم يعمل.');
     }
@@ -161,46 +268,13 @@ export function ImageMergeScreen({
       return;
     }
 
-    const permission = await MediaLibrary.requestPermissionsAsync(true);
-    if (!permission.granted) {
-      alert('مطلوب إذن الوصول إلى المكتبة لحفظ الصورة.');
-      return;
-    }
-
     try {
       const fileName = `${(outputName || `merged_${Date.now()}`).replace(
         /\s+/g,
         '_'
       )}.png`;
 
-      const localFileName = `merged_result_${Date.now()}.png`;
-      const fileUri = FileSystem.cacheDirectory + localFileName;
-
-      const downloaded = await FileSystem.downloadAsync(
-        mergedImageUri,
-        fileUri,
-        {
-          headers: {
-            Accept: 'image/png,image/*,*/*',
-          },
-        }
-      );
-
-      if (downloaded.status !== 200) {
-        console.error('Download failed:', downloaded.status, downloaded);
-        alert('حدث خطأ أثناء تحميل الصورة قبل الحفظ.');
-        return;
-      }
-
-      const fileInfo = await FileSystem.getInfoAsync(downloaded.uri);
-
-      if (!fileInfo.exists) {
-        console.error('Downloaded file does not exist:', downloaded.uri);
-        alert('حدث خطأ أثناء تجهيز الصورة للحفظ.');
-        return;
-      }
-
-      await MediaLibrary.saveToLibraryAsync(downloaded.uri);
+      await saveLocalImageToDevice(mergedImageUri);
 
       onAddOperation({
         tool: 'دمج الصور',
@@ -208,8 +282,8 @@ export function ImageMergeScreen({
       });
       alert('تم حفظ الصورة في المعرض بأعلى جودة بنجاح!');
     } catch (error) {
-      console.error('Save failed', error);
-      alert('حدث خطأ أثناء حفظ الصورة.');
+      console.error('Save failed full error:', error);
+      alert(`فشل الحفظ: ${getErrorMessage(error)}`);
     }
   };
 
