@@ -112,36 +112,26 @@ export function ImageMergeScreen({
       const response = await fetch(`${SERVER_URL}/merge`, {
         method: 'POST',
         body: formData,
+        headers: {
+          Accept: 'application/json',
+        },
       });
 
+      const responseText = await response.text();
+
       if (!response.ok) {
-        const errorText = await response.text();
-        console.error('Server error:', response.status, errorText);
+        console.error('Server error:', response.status, responseText);
         return null;
       }
 
-      // استلام الصورة الناتجة كـ blob
-      const blob = await response.blob();
-      
-      // تحويل blob إلى base64
-      const reader = new FileReader();
-      const base64Promise = new Promise<string>((resolve, reject) => {
-        reader.onload = () => {
-          const base64data = (reader.result as string).split(',')[1];
-          resolve(base64data);
-        };
-        reader.onerror = reject;
-      });
-      reader.readAsDataURL(blob);
-      const base64 = await base64Promise;
+      const data = JSON.parse(responseText);
 
-      // حفظ الملف المؤقت على الجهاز
-      const fileUri = FileSystem.cacheDirectory + 'merged_result.png';
-      await FileSystem.writeAsStringAsync(fileUri, base64, {
-        encoding: FileSystem.EncodingType.Base64,
-      });
+      if (!data?.url) {
+        console.error('No Cloudinary URL returned:', data);
+        return null;
+      }
 
-      return fileUri;
+      return data.url;
     } catch (error) {
       console.error('Merge upload failed', error);
       return null;
@@ -176,12 +166,20 @@ export function ImageMergeScreen({
       return;
     }
     try {
-      const asset = await MediaLibrary.createAssetAsync(mergedImageUri);
-      await MediaLibrary.createAlbumAsync('CookieTyper', asset, false);
       const fileName = `${(outputName || `merged_${Date.now()}`).replace(
         /\s+/g,
         '_'
       )}.png`;
+
+      const fileUri = FileSystem.cacheDirectory + fileName;
+
+      const downloaded = await FileSystem.downloadAsync(
+        mergedImageUri,
+        fileUri
+      );
+
+      const asset = await MediaLibrary.createAssetAsync(downloaded.uri);
+      await MediaLibrary.createAlbumAsync('CookieTyper', asset, false);
       onAddOperation({
         tool: 'دمج الصور',
         description: `تم دمج ${images.length} صور عموديًا وحفظها باسم ${fileName}.`,
