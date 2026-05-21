@@ -156,40 +156,48 @@ export function ImageMergeScreen({
   };
 
   const saveResult = async () => {
-    if (!mergedImageUri) {
-      alert('لا توجد صورة مدمجة للحفظ. قم بالدمج أولاً.');
-      return;
-    }
-    const permission = await MediaLibrary.requestPermissionsAsync();
-    if (!permission.granted) {
-      alert('مطلوب إذن الوصول إلى المكتبة لحفظ الصورة.');
-      return;
-    }
-    try {
-      const fileName = `${(outputName || `merged_${Date.now()}`).replace(
-        /\s+/g,
-        '_'
-      )}.png`;
+  if (!mergedImageUri) {
+    alert('لا توجد صورة مدمجة للحفظ. قم بالدمج أولاً.');
+    return;
+  }
+  const permission = await MediaLibrary.requestPermissionsAsync();
+  if (!permission.granted) {
+    alert('مطلوب إذن الوصول إلى المكتبة لحفظ الصورة.');
+    return;
+  }
+  try {
+    const fileName = `${(outputName || `merged_${Date.now()}`).replace(
+      /\s+/g,
+      '_'
+    )}.png`;
 
-      const fileUri = FileSystem.cacheDirectory + fileName;
+    const fileUri = FileSystem.cacheDirectory + fileName;
 
-      const downloaded = await FileSystem.downloadAsync(
-        mergedImageUri,
-        fileUri
-      );
+    const downloaded = await FileSystem.downloadAsync(
+      mergedImageUri,
+      fileUri
+    );
 
-      const asset = await MediaLibrary.createAssetAsync(downloaded.uri);
+    const asset = await MediaLibrary.createAssetAsync(downloaded.uri);
+
+    const album = await MediaLibrary.getAlbumAsync('CookieTyper');
+
+    if (album) {
+      await MediaLibrary.addAssetsToAlbumAsync([asset], album, false);
+    } else {
       await MediaLibrary.createAlbumAsync('CookieTyper', asset, false);
-      onAddOperation({
-        tool: 'دمج الصور',
-        description: `تم دمج ${images.length} صور عموديًا وحفظها باسم ${fileName}.`,
-      });
-      alert('تم حفظ الصورة في المعرض بأعلى جودة بنجاح!');
-    } catch (error) {
-      console.error('Save failed', error);
-      alert('حدث خطأ أثناء حفظ الصورة.');
     }
-  };
+
+    onAddOperation({
+      tool: 'دمج الصور',
+      description: `تم دمج ${images.length} صور عموديًا وحفظها باسم ${fileName}.`,
+    });
+    alert('تم حفظ الصورة في المعرض بأعلى جودة بنجاح!');
+  } catch (error) {
+    console.error('Save failed', error);
+    alert('حدث خطأ أثناء حفظ الصورة.');
+  }
+};
 
   const pickImages = async () => {
     const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
