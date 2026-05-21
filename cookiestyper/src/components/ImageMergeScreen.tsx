@@ -22,6 +22,16 @@ const TEXT_SECONDARY = 'rgba(255,255,255,0.7)';
 // رابط موقع الدمج
 const WEBSITE_URL = 'https://imge-indol.vercel.app';
 
+type PendingDownload = {
+  id: string;
+  mimeType?: string | null;
+  fileName?: string | null;
+  total: number;
+  chunks: string[];
+  received: number;
+  ended: boolean;
+};
+
 export function ImageMergeScreen({
   onOpenMenu,
   onAddOperation,
@@ -34,6 +44,8 @@ export function ImageMergeScreen({
   }) => void;
 }) {
   const webViewRef = useRef<WebView>(null);
+  const pendingDownloadRef = useRef<PendingDownload | null>(null);
+  const finishingDownloadRef = useRef(false);
 
   const [isLoading, setIsLoading] = useState(true);
   const [isPreparingFile, setIsPreparingFile] = useState(false);
@@ -93,6 +105,17 @@ export function ImageMergeScreen({
     return 'png';
   };
 
+  const guessExtensionFromUrl = (url: string) => {
+    const cleanUrl = url.split('?')[0].split('#')[0].toLowerCase();
+
+    if (cleanUrl.endsWith('.jpg') || cleanUrl.endsWith('.jpeg')) return 'jpg';
+    if (cleanUrl.endsWith('.png')) return 'png';
+    if (cleanUrl.endsWith('.webp')) return 'webp';
+    if (cleanUrl.endsWith('.gif')) return 'gif';
+
+    return 'png';
+  };
+
   const getMimeTypeFromExtension = (extension: string) => {
     const cleanExtension = extension.toLowerCase();
 
@@ -113,6 +136,22 @@ export function ImageMergeScreen({
     if (cleanExtension === 'gif') return 'com.compuserve.gif';
 
     return 'public.png';
+  };
+
+  const getFileNameFromUrl = (url: string) => {
+    try {
+      const cleanUrl = url.split('?')[0].split('#')[0];
+      const parts = cleanUrl.split('/');
+      const lastPart = parts[parts.length - 1];
+
+      if (lastPart && lastPart.includes('.')) {
+        return lastPart;
+      }
+
+      return null;
+    } catch (error) {
+      return null;
+    }
   };
 
   const openFilePickerForSaving = async ({
@@ -196,6 +235,112 @@ export function ImageMergeScreen({
     }
   };
 
+  const saveDataUrlToFiles = async ({
+    dataUrl,
+    fileName,
+  }: {
+    dataUrl: string;
+    fileName?: string | null;
+  }) => {
+    const match = String(dataUrl || '').match(/^data:([^;]+);base64,(.*)$/);
+
+    if (!match) {
+      Alert.alert('تنبيه', 'صيغة الصورة غير مدعومة للحفظ.');
+      return;
+    }
+
+    await saveBase64ImageToFiles({
+      mimeType: match[1],
+      base64: match[2],
+      fileName,
+    });
+  };
+
+  const saveImageUrlToFiles = async ({
+    url,
+    fileName,
+  }: {
+    url: string;
+    fileName?: string | null;
+  }) => {
+    setIsPreparingFile(true);
+
+    try {
+      const extension = guessExtensionFromUrl(url);
+      const finalMimeType = getMimeTypeFromExtension(extension);
+
+      const safeName = sanitizeFileName(
+        fileName || getFileNameFromUrl(url) || `merged_${Date.now()}.${extension}`
+      );
+
+      const finalName = safeName.toLowerCase().endsWith(`.${extension}`)
+        ? safeName
+        : `${safeName}.${extension}`;
+
+      const localUri = `${FileSystem.cacheDirectory}${finalName}`;
+
+      const downloaded = await FileSystem.downloadAsync(
+        url,
+        localUri,
+        {
+          headers: {
+            Accept: 'image/png,image/jpeg,image/webp,image/*,*/*',
+            'Cache-Control': 'no-cache',
+          },
+        }
+      );
+
+      if (downloaded.status !== 200) {
+        throw new Error(`فشل تحميل الصورة. كود الخطأ: ${downloaded.status}`);
+      }
+
+      await openFilePickerForSaving({
+        localUri: downloaded.uri,
+        mimeType: finalMimeType,
+        extension,
+      });
+
+      onAddOperation({
+        tool: 'دمج الصور',
+        description: `تم تجهيز الصورة الناتجة من الموقع باسم ${finalName} وفتح نافذة الحفظ.`,
+      });
+    } catch (error) {
+      console.error('Save image URL failed:', error);
+      Alert.alert('فشل تجهيز الملف', getErrorMessage(error));
+    } finally {
+      setIsPreparingFile(false);
+    }
+  };
+
+  const tryCompleteChunkedDownload = async () => {
+    const pending = pendingDownloadRef.current;
+
+    if (!pending) return;
+    if (!pending.ended) return;
+    if (pending.received < pending.total) return;
+    if (finishingDownloadRef.current) return;
+
+    finishingDownloadRef.current = true;
+
+    try {
+      const base64 = pending.chunks.join('');
+
+      pendingDownloadRef.current = null;
+
+      await saveBase64ImageToFiles({
+        base64,
+        mimeType: pending.mimeType,
+        fileName: pending.fileName,
+      });
+    } catch (error) {
+      console.error('Complete chunked download failed:', error);
+      Alert.alert('فشل تجهيز الملف', getErrorMessage(error));
+      setIsPreparingFile(false);
+    } finally {
+      finishingDownloadRef.current = false;
+    }
+  };
+
   const injectedAppBridge = useMemo(() => {
     return `
       (function () {
@@ -205,6 +350,8 @@ export function ImageMergeScreen({
         }
 
         window.__COOKIE_TYPER_APP_BRIDGE_INSTALLED__ = true;
+
+        var CHUNK_SIZE = 180000;
 
         function postToApp(payload) {
           try {
@@ -229,35 +376,6 @@ export function ImageMergeScreen({
           }
         }
 
-        function dataUrlToPayload(dataUrl, fileName) {
-          try {
-            var match = String(dataUrl || '').match(/^data:([^;]+);base64,(.*)$/);
-
-            if (!match) {
-              postToApp({
-                type: 'DOWNLOAD_ERROR',
-                message: 'لم يتم العثور على صورة جاهزة للحفظ. قم بالدمج أولاً.'
-              });
-              return false;
-            }
-
-            postToApp({
-              type: 'DOWNLOAD_BASE64',
-              mimeType: match[1],
-              base64: match[2],
-              fileName: getCleanFileName(fileName)
-            });
-
-            return true;
-          } catch (error) {
-            postToApp({
-              type: 'DOWNLOAD_ERROR',
-              message: error && error.message ? error.message : String(error)
-            });
-            return false;
-          }
-        }
-
         function getResultImageDataUrl() {
           var image = document.getElementById('resultImage');
 
@@ -276,6 +394,56 @@ export function ImageMergeScreen({
           }
 
           return 'merged_' + Date.now() + '.png';
+        }
+
+        function dataUrlToPayload(dataUrl, fileName) {
+          try {
+            var match = String(dataUrl || '').match(/^data:([^;]+);base64,(.*)$/);
+
+            if (!match) {
+              postToApp({
+                type: 'DOWNLOAD_ERROR',
+                message: 'لم يتم العثور على صورة جاهزة للحفظ. قم بالدمج أولاً.'
+              });
+              return false;
+            }
+
+            var mimeType = match[1];
+            var base64 = match[2];
+            var cleanFileName = getCleanFileName(fileName);
+            var id = 'download_' + Date.now() + '_' + Math.random().toString(36).slice(2);
+            var total = Math.ceil(base64.length / CHUNK_SIZE);
+
+            postToApp({
+              type: 'DOWNLOAD_START',
+              id: id,
+              mimeType: mimeType,
+              fileName: cleanFileName,
+              total: total
+            });
+
+            for (var i = 0; i < total; i++) {
+              postToApp({
+                type: 'DOWNLOAD_CHUNK',
+                id: id,
+                index: i,
+                chunk: base64.slice(i * CHUNK_SIZE, (i + 1) * CHUNK_SIZE)
+              });
+            }
+
+            postToApp({
+              type: 'DOWNLOAD_END',
+              id: id
+            });
+
+            return true;
+          } catch (error) {
+            postToApp({
+              type: 'DOWNLOAD_ERROR',
+              message: error && error.message ? error.message : String(error)
+            });
+            return false;
+          }
         }
 
         function triggerNativeSaveFromCurrentResult() {
@@ -437,6 +605,21 @@ export function ImageMergeScreen({
           return element;
         };
 
+        if (window.HTMLAnchorElement && window.HTMLAnchorElement.prototype) {
+          var originalAnchorClick = window.HTMLAnchorElement.prototype.click;
+
+          window.HTMLAnchorElement.prototype.click = function () {
+            try {
+              if (this.href && String(this.href).startsWith('data:image')) {
+                dataUrlToPayload(this.href, this.getAttribute('download') || getOutputFileName());
+                return;
+              }
+            } catch (error) {}
+
+            return originalAnchorClick.apply(this, arguments);
+          };
+        }
+
         window.open = function () {
           if (window.CookieTyperOpenNativePreview) {
             window.CookieTyperOpenNativePreview();
@@ -478,6 +661,65 @@ export function ImageMergeScreen({
       const raw = event.nativeEvent.data;
       const data = JSON.parse(raw);
 
+      if (data?.type === 'DOWNLOAD_START') {
+        const total = Number(data.total || 0);
+
+        if (!data.id || total <= 0) {
+          Alert.alert('تنبيه', 'تعذر تجهيز الصورة للحفظ.');
+          return;
+        }
+
+        pendingDownloadRef.current = {
+          id: String(data.id),
+          mimeType: data.mimeType,
+          fileName: data.fileName,
+          total,
+          chunks: new Array(total),
+          received: 0,
+          ended: false,
+        };
+
+        setIsPreparingFile(true);
+        return;
+      }
+
+      if (data?.type === 'DOWNLOAD_CHUNK') {
+        const pending = pendingDownloadRef.current;
+
+        if (!pending || pending.id !== data.id) {
+          return;
+        }
+
+        const index = Number(data.index);
+
+        if (
+          Number.isFinite(index) &&
+          index >= 0 &&
+          index < pending.total &&
+          typeof data.chunk === 'string'
+        ) {
+          if (typeof pending.chunks[index] !== 'string') {
+            pending.received += 1;
+          }
+
+          pending.chunks[index] = data.chunk;
+        }
+
+        await tryCompleteChunkedDownload();
+        return;
+      }
+
+      if (data?.type === 'DOWNLOAD_END') {
+        const pending = pendingDownloadRef.current;
+
+        if (pending && pending.id === data.id) {
+          pending.ended = true;
+          await tryCompleteChunkedDownload();
+        }
+
+        return;
+      }
+
       if (data?.type === 'DOWNLOAD_BASE64') {
         await saveBase64ImageToFiles({
           base64: data.base64,
@@ -487,13 +729,62 @@ export function ImageMergeScreen({
         return;
       }
 
+      if (data?.type === 'DOWNLOAD_URL') {
+        await saveImageUrlToFiles({
+          url: data.url,
+          fileName: data.fileName,
+        });
+        return;
+      }
+
       if (data?.type === 'DOWNLOAD_ERROR') {
         Alert.alert('تنبيه', data.message || 'حدث خطأ أثناء محاولة تجهيز الصورة.');
+        setIsPreparingFile(false);
         return;
       }
     } catch (error) {
       console.error('WebView message parse failed:', error);
+      setIsPreparingFile(false);
     }
+  };
+
+  const handleShouldStartLoadWithRequest = (request: any) => {
+    const url = request?.url || '';
+
+    if (!url) return true;
+
+    if (String(url).startsWith('data:image')) {
+      setIsLoading(false);
+      saveDataUrlToFiles({
+        dataUrl: url,
+        fileName: `merged_${Date.now()}.png`,
+      });
+      return false;
+    }
+
+    if (String(url).startsWith('blob:')) {
+      setIsLoading(false);
+      return false;
+    }
+
+    const cleanUrl = String(url).split('?')[0].split('#')[0].toLowerCase();
+
+    if (
+      cleanUrl.endsWith('.png') ||
+      cleanUrl.endsWith('.jpg') ||
+      cleanUrl.endsWith('.jpeg') ||
+      cleanUrl.endsWith('.webp') ||
+      cleanUrl.endsWith('.gif')
+    ) {
+      setIsLoading(false);
+      saveImageUrlToFiles({
+        url,
+        fileName: getFileNameFromUrl(url),
+      });
+      return false;
+    }
+
+    return true;
   };
 
   return (
@@ -531,10 +822,11 @@ export function ImageMergeScreen({
             style={styles.webView}
             originWhitelist={['*']}
             javaScriptEnabled
+            javaScriptCanOpenWindowsAutomatically
             domStorageEnabled
             sharedCookiesEnabled
             thirdPartyCookiesEnabled
-            startInLoadingState
+            startInLoadingState={false}
             allowsBackForwardNavigationGestures={false}
             setSupportMultipleWindows={false}
             mixedContentMode="always"
@@ -544,6 +836,7 @@ export function ImageMergeScreen({
             injectedJavaScript={injectedAppBridge}
             injectedJavaScriptBeforeContentLoaded={injectedAppBridge}
             onMessage={onMessage}
+            onShouldStartLoadWithRequest={handleShouldStartLoadWithRequest}
             onLoadStart={() => setIsLoading(true)}
             onLoadEnd={() => {
               setIsLoading(false);
@@ -555,6 +848,16 @@ export function ImageMergeScreen({
             }}
             onHttpError={(event) => {
               console.error('WebView HTTP error:', event.nativeEvent);
+            }}
+            onFileDownload={(event) => {
+              const downloadUrl = event.nativeEvent.downloadUrl;
+
+              if (downloadUrl) {
+                saveImageUrlToFiles({
+                  url: downloadUrl,
+                  fileName: getFileNameFromUrl(downloadUrl),
+                });
+              }
             }}
           />
 
