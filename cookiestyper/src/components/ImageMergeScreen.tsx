@@ -98,7 +98,7 @@ export function ImageMergeScreen({
 
   const downloadResultToLocalFile = async (resultUrl: string): Promise<string | null> => {
     try {
-      const baseDirectory = FileSystem.documentDirectory || FileSystem.cacheDirectory;
+      const baseDirectory = FileSystem.cacheDirectory || FileSystem.documentDirectory;
 
       if (!baseDirectory) {
         console.error('No local directory available for saving merged image.');
@@ -108,7 +108,7 @@ export function ImageMergeScreen({
       const localFileName = `merged_result_${Date.now()}.png`;
       const localFileUri = baseDirectory + localFileName;
 
-      const downloaded = await FileSystem.downloadAsync(
+      const downloadResumable = FileSystem.createDownloadResumable(
         resultUrl,
         localFileUri,
         {
@@ -116,8 +116,24 @@ export function ImageMergeScreen({
             Accept: 'image/png,image/*,*/*',
             'Cache-Control': 'no-cache',
           },
+        },
+        (downloadProgress) => {
+          const totalBytesWritten = downloadProgress.totalBytesWritten || 0;
+          const totalBytesExpectedToWrite = downloadProgress.totalBytesExpectedToWrite || 0;
+
+          if (totalBytesExpectedToWrite > 0) {
+            const progress = totalBytesWritten / totalBytesExpectedToWrite;
+            console.log('Download progress:', Math.round(progress * 100));
+          }
         }
       );
+
+      const downloaded = await downloadResumable.downloadAsync();
+
+      if (!downloaded) {
+        console.error('Download returned empty result.');
+        return null;
+      }
 
       if (downloaded.status !== 200) {
         console.error('Result download failed:', downloaded.status, downloaded);
@@ -130,6 +146,11 @@ export function ImageMergeScreen({
 
       if (!fileInfo.exists) {
         console.error('Downloaded merged file does not exist:', downloaded.uri);
+        return null;
+      }
+
+      if ('size' in fileInfo && typeof fileInfo.size === 'number' && fileInfo.size <= 0) {
+        console.error('Downloaded merged file is empty:', downloaded.uri);
         return null;
       }
 
@@ -149,25 +170,21 @@ export function ImageMergeScreen({
       throw new Error('ملف الصورة غير موجود داخل التطبيق.');
     }
 
-    const permission = await MediaLibrary.requestPermissionsAsync(false);
+    if ('size' in fileInfo && typeof fileInfo.size === 'number' && fileInfo.size <= 0) {
+      throw new Error('ملف الصورة موجود لكنه فارغ.');
+    }
+
+    const permission = await MediaLibrary.requestPermissionsAsync(true);
 
     if (!permission.granted) {
       throw new Error('مطلوب إذن الوصول إلى المكتبة لحفظ الصورة.');
     }
 
     try {
+      await MediaLibrary.createAssetAsync(localUri);
+    } catch (createAssetError) {
+      console.error('createAssetAsync failed, trying saveToLibraryAsync:', createAssetError);
       await MediaLibrary.saveToLibraryAsync(localUri);
-    } catch (saveError) {
-      console.error('saveToLibraryAsync failed, trying createAssetAsync:', saveError);
-
-      const asset = await MediaLibrary.createAssetAsync(localUri);
-      const album = await MediaLibrary.getAlbumAsync('CookieTyper');
-
-      if (album) {
-        await MediaLibrary.addAssetsToAlbumAsync([asset], album, false);
-      } else {
-        await MediaLibrary.createAlbumAsync('CookieTyper', asset, false);
-      }
     }
   };
 
@@ -175,7 +192,6 @@ export function ImageMergeScreen({
   const uploadAndMerge = async (): Promise<string | null> => {
     if (images.length === 0) return null;
 
-    setIsMerging(true);
     try {
       const formData = new FormData();
 
@@ -214,7 +230,6 @@ export function ImageMergeScreen({
         return null;
       }
 
-      // تحميل الصورة الناتجة فورًا من الرابط إلى ملف محلي داخل الجهاز
       const localUri = await downloadResultToLocalFile(data.url);
 
       if (!localUri) {
@@ -226,39 +241,50 @@ export function ImageMergeScreen({
     } catch (error) {
       console.error('Merge upload failed', error);
       return null;
-    } finally {
-      setIsMerging(false);
     }
   };
 
   const mergeStart = async () => {
     if (!images.length) return;
-    const uri = await uploadAndMerge();
-    if (uri) {
-      setMergedImageUri(uri);
-      setResultReady(true);
 
-      try {
-        await saveLocalImageToDevice(uri);
+    setIsMerging(true);
+    setResultReady(false);
+    setMergedImageUri(null);
 
-        onAddOperation({
-          tool: 'دمج الصور',
-          description: `تم توليد ناتج دمج عمودي لـ ${images.length} صور بجودة أصلية وحفظه تلقائيًا في الجهاز.`,
-        });
+    try {
+      const uri = await uploadAndMerge();
 
-        alert('تم الدمج وحفظ الصورة تلقائيًا في الاستوديو بنجاح!');
-      } catch (error) {
-        console.error('Auto save failed:', error);
+      if (uri) {
+        setMergedImageUri(uri);
+        setResultReady(true);
 
-        onAddOperation({
-          tool: 'دمج الصور',
-          description: `تم توليد ناتج دمج عمودي لـ ${images.length} صور بجودة أصلية.`,
-        });
+        try {
+          await saveLocalImageToDevice(uri);
 
-        alert(`تم الدمج بنجاح، لكن فشل الحفظ التلقائي: ${getErrorMessage(error)}`);
+          onAddOperation({
+            tool: 'دمج الصور',
+            description: `تم توليد ناتج دمج عمودي لـ ${images.length} صور بجودة أصلية وحفظه تلقائيًا في الجهاز.`,
+          });
+
+          alert('تم الدمج وحفظ الصورة تلقائيًا في الاستوديو بنجاح!');
+        } catch (error) {
+          console.error('Auto save failed:', error);
+
+          onAddOperation({
+            tool: 'دمج الصور',
+            description: `تم توليد ناتج دمج عمودي لـ ${images.length} صور بجودة أصلية.`,
+          });
+
+          alert(`تم الدمج بنجاح، لكن فشل الحفظ التلقائي: ${getErrorMessage(error)}`);
+        }
+      } else {
+        alert('فشل الدمج أو تحميل النتيجة من الخادم. تأكد من اتصالك بالإنترنت ومن أن الخادم يعمل.');
       }
-    } else {
-      alert('فشل الدمج على الخادم، تأكد من اتصالك بالإنترنت ومن أن الخادم يعمل.');
+    } catch (error) {
+      console.error('Merge start failed:', error);
+      alert(`فشل الدمج: ${getErrorMessage(error)}`);
+    } finally {
+      setIsMerging(false);
     }
   };
 
