@@ -36,7 +36,7 @@ const TEXT_HINT = 'rgba(255,255,255,0.38)';
 const GAP = 0; // تم جعله 0 لدمج احترافي بدون فراغات بيضاء، يمكنك تغييره إن أردت
 
 // قم بتغيير هذا الرابط إلى رابط خادمك على Railway
-const SERVER_URL = 'https://your-server.railway.app';
+const SERVER_URL = 'https://oppp-production.up.railway.app';
 
 type MergeImageItem = {
   id: string;
