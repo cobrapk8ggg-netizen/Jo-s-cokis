@@ -515,9 +515,13 @@ export function ImageMergeScreen({
             { paddingTop: getStatusBarHeight() + 4 },
           ]}
         >
-          <TouchableOpacity onPress={onOpenMenu} style={styles.menuBtn}>
-            <Text style={styles.menuText}>☰</Text>
-          </TouchableOpacity>
+          <View style={styles.headerContent}>
+            <TouchableOpacity onPress={onOpenMenu} style={styles.menuBtn}>
+              <Text style={styles.menuText}>☰</Text>
+            </TouchableOpacity>
+
+            <Text style={styles.appTitle}>CookiesTyper</Text>
+          </View>
         </View>
 
         <View style={styles.webContainer}>
@@ -554,15 +558,19 @@ export function ImageMergeScreen({
             }}
           />
 
-          {(isLoading || isPreparingFile) && (
+          {isLoading && !isPreparingFile && (
+            <View style={styles.initialLoadingOverlay} />
+          )}
+
+          {isPreparingFile && (
             <View style={styles.loadingOverlay}>
               <View style={styles.loadingBox}>
                 <ActivityIndicator size="large" color={COOKIES_PINK} />
                 <Text style={styles.loadingText}>
-                  {isPreparingFile ? 'جاري تجهيز ملف الصورة...' : 'جاري فتح الأداة...'}
+                  جاري تجهيز ملف الصورة...
                 </Text>
                 <Text style={styles.loadingSubText}>
-                  {isPreparingFile ? 'سيتم فتح نافذة الحفظ بعد لحظات' : 'يرجى الانتظار'}
+                  سيتم فتح نافذة الحفظ بعد لحظات
                 </Text>
               </View>
             </View>
@@ -588,11 +596,17 @@ const styles = StyleSheet.create({
     borderBottomColor: 'rgba(255,255,255,0.06)',
     paddingHorizontal: 10,
     paddingBottom: 6,
-    alignItems: 'flex-end',
-    justifyContent: 'center',
     zIndex: 10,
   },
+  headerContent: {
+    height: 40,
+    justifyContent: 'center',
+    alignItems: 'center',
+    position: 'relative',
+  },
   menuBtn: {
+    position: 'absolute',
+    right: 0,
     backgroundColor: 'rgba(255,255,255,0.06)',
     borderRadius: 14,
     paddingHorizontal: 14,
@@ -605,6 +619,13 @@ const styles = StyleSheet.create({
     fontSize: 18,
     fontWeight: '700',
   },
+  appTitle: {
+    color: 'white',
+    fontSize: 18,
+    fontWeight: '900',
+    letterSpacing: 0.5,
+    textAlign: 'center',
+  },
   webContainer: {
     flex: 1,
     backgroundColor: '#050505',
@@ -612,6 +633,11 @@ const styles = StyleSheet.create({
   webView: {
     flex: 1,
     backgroundColor: '#050505',
+  },
+  initialLoadingOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: '#050505',
+    zIndex: 20,
   },
   loadingOverlay: {
     ...StyleSheet.absoluteFillObject,
